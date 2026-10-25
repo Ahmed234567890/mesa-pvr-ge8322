@@ -1,0 +1,28 @@
+# Build artifacts
+build/
+build-*/
+*.o
+*.a
+*.so
+*.so.*
+
+# Vendor blobs, firmware, and kernel modules must never be published
+*.ko
+*.fw
+rgx.fw.*
+rgx.sh.*
+pvrsrvkm*
+libsrv_um*
+libGLESv2_powervr*
+libEGL_powervr*
+libIMGegl*
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editors and OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
