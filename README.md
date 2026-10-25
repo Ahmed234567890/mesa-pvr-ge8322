@@ -4,14 +4,19 @@ Unofficial, experimental Mesa PowerVR (`pvr`) research for the PowerVR Rogue
 GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 (`SM-A032F`).
 
-> **Status:** research only. There is no working GE8322 Mesa driver yet.
-> The vendor kernel exposes a proprietary `pvrsrvkm` UAPI, while Mesa `pvr`
-> expects mainline `drm/imagination`. That kernel/firmware path is the hard
-> blocker.
+> **Status:** research only for Mesa `pvr`. There is no working GE8322 Mesa
+> driver yet. The vendor kernel exposes a proprietary `pvrsrvkm` UAPI, while
+> Mesa `pvr` expects mainline `drm/imagination`. That kernel/firmware path is
+> the hard blocker.
+>
+> A separate vendor-HAL Vulkan bridge lives in [bridge/](bridge/). Its host
+> build is validated; on-device testing is pending.
 
 ## Start here
 
 - [GE8322.md](GE8322.md) — hardware details, current findings, blockers, roadmap
+- [bridge/README.md](bridge/README.md) — vendor Vulkan HAL → libhybris →
+  WSI layer → X11 bridge
 - [ge8322/vendor-features.md](ge8322/vendor-features.md) — decoded vendor DDK
   feature and errata data
 - [ge8322/decode_vendor_bvnc.py](ge8322/decode_vendor_bvnc.py) — reproducer for
