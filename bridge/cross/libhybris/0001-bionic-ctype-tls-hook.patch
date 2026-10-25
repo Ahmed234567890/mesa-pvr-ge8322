@@ -1,0 +1,31 @@
+--- a/hybris/common/hooks.c
++++ b/hybris/common/hooks.c
+@@ -2562,6 +2562,20 @@
+     return setlocale(category, locale);
+ }
+ 
++/*
++ * Bionic's implementation reads libc_globals from its own TLS area.  When
++ * libc.so is loaded by libhybris into a glibc process that TLS area is not
++ * initialized, so the first locale lookup dereferences NULL + 0x410.  The
++ * C locale is the only locale available to the Android side here, and its
++ * MB_CUR_MAX is 1.
++ */
++static size_t _hybris_hook___ctype_get_mb_cur_max(void)
++{
++    TRACE_HOOK("");
++
++    return 1;
++}
++
+ static void* _hybris_hook_mmap(void *addr, size_t len, int prot,
+                   int flags, int fd, off_t offset)
+ {
+@@ -3303,6 +3317,7 @@
+     HOOK_DIRECT(uselocale),
+     HOOK_DIRECT(localeconv),
+     HOOK_DIRECT(setlocale),
++    HOOK_TO(__ctype_get_mb_cur_max, _hybris_hook___ctype_get_mb_cur_max),
+     /* sys/mman.h */
+     HOOK_DIRECT(mmap),
+     HOOK_DIRECT(munmap),

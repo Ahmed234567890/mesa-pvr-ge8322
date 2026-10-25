@@ -4,9 +4,10 @@ This is the vendor-HAL route for hardware Vulkan on the Samsung Galaxy A03
 Core (SM-A032F, SC9863A, PowerVR GE8322). It is separate from the Mesa `pvr`
 research in the rest of this repository.
 
-> **Status:** host build and bundle validation are complete. The bundle has
-> **not** been run on the phone yet. The first on-device step is the
-> display-independent `pvr-smoke` test; X11 presentation comes after that.
+> **Status:** the display-independent `pvr-smoke` test passes on the phone
+> (SM-A032F, Android 14, stock bionic). It enumerates the PowerVR Rogue
+> GE8322 through the vendor HAL and reads back a rendered clear. X11
+> presentation with `vkcube` is the next step.
 
 ## Stack
 
@@ -52,9 +53,10 @@ the ICD's surface entry points.
 | `src/sysvk/` | ICD shim that opens the vendor `vulkan` HAL through `hw_get_module()` |
 | `src/ahb-wrapper/` | `AHardwareBuffer_*` entry points for the WSI layer, resolved through libhybris |
 | `src/pvr-smoke.c` | display-independent device, clear, and readback test |
-| `build/wsi-layer/` | patches against `xMeM/vulkan-wsi-layer@d5624d4` |
-| `build/armhf-toolchain.cmake` | Arm GNU Toolchain cross-compilation definition |
-| `build/stage.sh` | assembles the `/opt/pvr-bridge` bundle |
+| `cross/wsi-layer/` | patches against `xMeM/vulkan-wsi-layer@d5624d4` |
+| `cross/libhybris/` | bionic TLS compatibility patch for libhybris |
+| `cross/armhf-toolchain.cmake` | Arm GNU Toolchain cross-compilation definition |
+| `cross/stage.sh` | assembles the `/opt/pvr-bridge` bundle |
 
 No binaries, vendor blobs, firmware, or kernel modules are stored here.
 
@@ -91,6 +93,7 @@ must be relaxed for current Vulkan headers:
 ```sh
 cd "$BUILD/libhybris"
 sed -i 's/#if VK_HEADER_VERSION >= 269/#if 0/g' hybris/vulkan/vulkan.c
+git apply /path/to/mesa-pvr-ge8322/bridge/cross/libhybris/0001-bionic-ctype-tls-hook.patch
 
 ./autogen.sh \
   --host=arm-linux-gnueabihf --build=x86_64-pc-linux-gnu \
@@ -110,6 +113,13 @@ make -j"$(nproc)"
 This produces `libhybris-common`, `libhardware`, `libandroid-properties`, the
 Vulkan wrapper, and the linker plugins (`q.so`, `o.so`, `n.so`, `mm.so`,
 `jb.so`).
+
+The patch adds a hook for bionic's `__ctype_get_mb_cur_max()`. Bionic reads
+`libc_globals` from its own TLS area, which libhybris does not initialize when
+it loads `libc.so` into a glibc process. The first locale lookup therefore
+dereferences `NULL + 0x410`. The hook returns the C locale's `MB_CUR_MAX`
+value (`1`), which is the only locale the Android side uses here. It avoids
+needing a patched arm32 bionic `libc.so`.
 
 ### 2. WSI layer
 
@@ -209,13 +219,25 @@ chroot /data/local/nhsystem/kali-armhf /usr/bin/env -i \
 `pvr-smoke` should print the PowerVR device name, queue families, and a
 readback of `64 128 191 255` (the clear color `0.25, 0.50, 0.75, 1.0`).
 
+Verified on the SM-A032F with the default environment:
+
+```text
+physical devices: 1
+device 0: PowerVR Rogue GE8322
+  api 1.3.216 driver 0x005fa40b vendor 0x1010 device 0x22104218 type 1
+queue family 0: flags 0x7 count 2
+readback first: 64 128 191 255
+readback last:  64 128 191 255
+pvr-smoke: OK
+```
+
 If it fails:
 
 1. `PVR_NO_LAYER=1` — isolates the ICD from the WSI layer.
 2. `PVR_DEBUG=1` — enables loader and libhybris diagnostics.
-3. If the vendor HAL cannot load against stock Android 14 bionic, an arm32
-   patched libc is the next thing to investigate. The reference project only
-   publishes an arm64 patched libc.
+3. If loading fails before the device is enumerated, confirm the ctype patch
+   was applied to `hybris/common/hooks.c`. Do not skip bionic property
+   initialization: the vendor ICD needs it to find its libraries.
 
 After the smoke test passes:
 
@@ -235,9 +257,9 @@ run `vkcube`.
   `pvrsrvkm` versus `drm/imagination` UAPI mismatch remains.
 - **32-bit armhf userspace.** The vendor HAL is 32-bit; the bridge is built
   for the same ABI.
-- **Stock bionic is untested on device.** The Q linker and the vendor HAL are
-  expected to work with Android 14's bionic, but this has not been confirmed
-  on the phone yet.
+- **bionic TLS.** Stock Android 14 bionic works with the ctype hook above.
+  Without it, the first locale lookup crashes because bionic's TLS area is not
+  initialized in the glibc process. No patched `libc.so` is required.
 
 ## Licensing
 

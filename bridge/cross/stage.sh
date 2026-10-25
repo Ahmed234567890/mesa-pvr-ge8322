@@ -136,6 +136,7 @@ cat > "$STAGE/bin/pvr-env" <<'EOF'
 # Configures the PowerVR Vulkan bridge inside the Kali chroot.
 PVR_BRIDGE="${PVR_BRIDGE:-/opt/pvr-bridge}"
 
+export PATH="$PVR_BRIDGE/bin${PATH:+:$PATH}"
 export LD_LIBRARY_PATH="$PVR_BRIDGE/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # libhybris uses the Android linker plugin named after the device SDK.
