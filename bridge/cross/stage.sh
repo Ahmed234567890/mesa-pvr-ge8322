@@ -7,6 +7,7 @@
 #   build-sysvk/                sysvk build
 #   build-wsi/                  WSI layer build
 #   pvr-smoke                   cross-compiled smoke test
+#   pvr-mount-private           static MS_PRIVATE|MS_REC helper
 #
 # Target location on the phone: /opt/pvr-bridge inside the Kali chroot.
 set -euo pipefail
@@ -28,6 +29,7 @@ required=(
     "$BUILD/build-sysvk/libsysvk.so"
     "$BUILD/build-wsi/libVkLayer_window_system_integration.so"
     "$BUILD/pvr-smoke"
+    "$BUILD/pvr-mount-private"
 )
 for f in "${required[@]}"; do
     [ -e "$f" ] || { echo "stage: missing $f" >&2; exit 1; }
@@ -35,7 +37,7 @@ done
 
 rm -rf "$STAGE"
 install -d "$STAGE/lib" "$STAGE/libhybris/linker" \
-           "$STAGE/share/vulkan/icd.d" "$STAGE/share/vulkan/explicit_layer.d" \
+           "$STAGE/share/vulkan/icd.d" "$STAGE/share/vulkan/implicit_layer.d" \
            "$STAGE/bin"
 
 # --- libraries -------------------------------------------------------------
@@ -79,16 +81,19 @@ cat > "$STAGE/share/vulkan/icd.d/sysvk_icd.json" <<EOF
 }
 EOF
 
-# --- Vulkan explicit layer manifest ----------------------------------------
-# Only advertise what this build actually implements:
+# --- Vulkan implicit layer manifest ----------------------------------------
+# The layer is implicit: vkcube and other applications query VK_KHR_surface
+# during instance creation, before they would enable an explicit layer by
+# name.  Only advertise what this build actually implements:
 #   X11 + headless WSI, non-experimental (no present timing / maintenance1 /
 #   image compression control swapchain).
-cat > "$STAGE/share/vulkan/explicit_layer.d/VkLayer_window_system_integration.json" <<EOF
+cat > "$STAGE/share/vulkan/implicit_layer.d/VkLayer_window_system_integration.json" <<EOF
 {
     "file_format_version": "1.1.2",
     "layer": {
         "name": "VK_LAYER_window_system_integration",
         "type": "GLOBAL",
+        "is_implicit": true,
         "library_path": "$PREFIX/lib/libVkLayer_window_system_integration.so",
         "api_version": "1.3.216",
         "implementation_version": "1",
@@ -144,17 +149,22 @@ export HYBRIS_LINKER_DIR="$PVR_BRIDGE/libhybris/linker"
 export HYBRIS_ANDROID_SDK_VERSION="${HYBRIS_ANDROID_SDK_VERSION:-34}"
 export HYBRIS_LD_LIBRARY_PATH="/system/lib:/vendor/lib:/vendor/lib/hw:/odm/lib:/apex/com.android.runtime/lib"
 
-# Force our ICD and, unless PVR_NO_LAYER=1, our explicit WSI layer.
+# Force our ICD and, unless PVR_NO_LAYER=1, auto-enable our WSI layer.
+# The layer is installed as implicit: applications such as vkcube ask for
+# VK_KHR_surface during instance creation, before an explicit layer could be
+# enabled by name.
 export VK_ICD_FILENAMES="$PVR_BRIDGE/share/vulkan/icd.d/sysvk_icd.json"
+unset VK_INSTANCE_LAYERS VK_LAYER_PATH
 if [ "${PVR_NO_LAYER:-0}" = "1" ]; then
-    unset VK_LAYER_PATH VK_INSTANCE_LAYERS
+    unset VK_ADD_IMPLICIT_LAYER_PATH
 else
-    export VK_LAYER_PATH="$PVR_BRIDGE/share/vulkan/explicit_layer.d"
-    export VK_INSTANCE_LAYERS="VK_LAYER_window_system_integration"
+    export VK_ADD_IMPLICIT_LAYER_PATH="$PVR_BRIDGE/share/vulkan/implicit_layer.d"
 fi
 
-# Mesa's implicit layers can intercept presentation; keep them out of the way.
-export VK_LOADER_LAYERS_DISABLE="${VK_LOADER_LAYERS_DISABLE:-~implicit~}"
+# Mesa's device-select and anti-lag implicit layers can intercept the vendor
+# ICD's device selection and presentation.  Do not use "~implicit~" here: it
+# would also disable the WSI layer above.
+export VK_LOADER_LAYERS_DISABLE="${VK_LOADER_LAYERS_DISABLE:-VK_LAYER_MESA_device_select,VK_LAYER_MESA_anti_lag}"
 
 # The WSI layer resolves AHardwareBuffer_* with dlsym(RTLD_DEFAULT, ...).
 export LD_PRELOAD="$PVR_BRIDGE/lib/libahb-wrapper.so${LD_PRELOAD:+:$LD_PRELOAD}"
@@ -174,6 +184,7 @@ PVR_BRIDGE="${PVR_BRIDGE:-/opt/pvr-bridge}"
 exec "$@"
 EOF
 install -m 755 "$BUILD/pvr-smoke" "$STAGE/bin/pvr-smoke"
+install -m 755 "$BUILD/pvr-mount-private" "$STAGE/bin/pvr-mount-private"
 chmod 755 "$STAGE/bin/pvr-run"
 chmod 644 "$STAGE/bin/pvr-env"
 
@@ -190,16 +201,17 @@ Samsung Galaxy A03 Core (SM-A032F, SC9863A, PowerVR GE8322).
 | --- | --- |
 | `lib/libsysvk.so` | Vulkan ICD shim; opens `vulkan.sp9863a.so` through libhybris |
 | `lib/libVkLayer_window_system_integration.so` | Arm WSI layer (X11 DRI3/Present + headless) |
-| `lib/libahb-wrapper.so` | `AHardwareBuffer_*` shim used by the WSI layer |
+| `lib/libahb-wrapper.so` | `AHardwareBuffer_*` shim; resolves through `libnativewindow.so` |
 | `lib/libhybris-common.so.1` | libhybris core |
 | `lib/libhardware.so.2` | `hw_get_module()` bridge |
 | `lib/libandroid-properties.so.1` | Android property bridge |
 | `libhybris/linker/q.so` | Android 14 (SDK 34) linker plugin |
 | `share/vulkan/icd.d/sysvk_icd.json` | ICD manifest |
-| `share/vulkan/explicit_layer.d/...json` | WSI layer manifest |
+| `share/vulkan/implicit_layer.d/...json` | implicit WSI layer manifest |
 | `bin/pvr-env` | sourceable environment |
 | `bin/pvr-run` | run one command with the environment |
 | `bin/pvr-smoke` | display-independent device + clear/readback test |
+| `bin/pvr-mount-private` | static `MS_PRIVATE\|MS_REC` helper for chroot bind mounts |
 
 ## Runtime prerequisites
 
@@ -221,7 +233,7 @@ its permissive default search paths, which is what the vendor HAL needs.
 . /opt/pvr-bridge/bin/pvr-env
 pvr-smoke                 # device + clear/readback, no display needed
 vulkaninfo --summary
-vkcube                    # requires Termux:X11
+vkcube --c 120            # requires Termux:X11
 ```
 
 or, scoped to one command:
@@ -237,10 +249,11 @@ inside the chroot (bind-mount
 The current layer does not present into Xtigervnc/KeX; that needs a
 readback/SHM WSI path.
 
-`pvr-env` disables Mesa's implicit layers (`VK_LOADER_LAYERS_DISABLE=~implicit~`)
-so they cannot intercept presentation. Set `PVR_DEBUG=1` before sourcing it
-to enable loader and libhybris debug output. Set `PVR_NO_LAYER=1` to test the
-ICD without the WSI layer.
+`pvr-env` installs the WSI layer as an implicit layer through
+`VK_ADD_IMPLICIT_LAYER_PATH`, and disables only Mesa's device-select and
+anti-lag implicit layers so they cannot intercept presentation. Set
+`PVR_DEBUG=1` before sourcing it to enable loader and libhybris debug output.
+Set `PVR_NO_LAYER=1` to test the ICD without the WSI layer.
 
 ## Notes
 

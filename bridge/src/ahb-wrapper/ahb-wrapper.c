@@ -4,10 +4,16 @@
  *
  * The Arm window-system-integration layer looks up
  * AHardwareBuffer_sendHandleToUnixSocket and AHardwareBuffer_release with
- * dlsym(RTLD_DEFAULT, ...).  Those symbols live in bionic's libandroid.so,
- * which cannot be linked directly into a glibc process.  This shim resolves
- * them through libhybris' Android linker and exports thin forwarding
- * wrappers under the bionic names.
+ * dlsym(RTLD_DEFAULT, ...).  Those symbols live in bionic, which cannot be
+ * linked directly into a glibc process.  This shim resolves them through
+ * libhybris' Android linker and exports thin forwarding wrappers under the
+ * bionic names.
+ *
+ * libnativewindow.so is tried first.  It exports the AHardwareBuffer C API
+ * and only pulls the graphics stack.  libandroid.so is a fallback only: on
+ * Android 14 it is the framework hub and loading it drags in
+ * libandroid_runtime/libhwui/libcrypto, which aborts inside a libhybris
+ * process before the entry points can be used.
  *
  * Only the four entry points used by the bridge are provided.  The ABI is
  * plain C and does not depend on the layout of AHardwareBuffer or
@@ -56,43 +62,64 @@ static int debug_enabled(void)
    return value != NULL && value[0] == '1';
 }
 
-static void load_api(void)
+static int load_from(const char *name)
 {
-   void *android = hybris_dlopen("libandroid.so", RTLD_LAZY);
-   if (android == NULL)
+   void *handle = hybris_dlopen(name, RTLD_LAZY);
+   if (handle == NULL)
    {
       if (debug_enabled())
       {
-         fprintf(stderr, "ahb-wrapper: cannot open libandroid.so: %s\n", hybris_dlerror());
+         fprintf(stderr, "ahb-wrapper: cannot open %s: %s\n", name, hybris_dlerror());
       }
-      return;
+      return 0;
    }
 
-   api.allocate = (ahb_allocate_fn)hybris_dlsym(android, "AHardwareBuffer_allocate");
-   api.release = (ahb_release_fn)hybris_dlsym(android, "AHardwareBuffer_release");
-   api.send_handle = (ahb_send_handle_fn)hybris_dlsym(android, "AHardwareBuffer_sendHandleToUnixSocket");
-   api.get_handle = (ahb_get_handle_fn)hybris_dlsym(android, "AHardwareBuffer_getNativeHandle");
+   ahb_allocate_fn allocate = (ahb_allocate_fn)hybris_dlsym(handle, "AHardwareBuffer_allocate");
+   ahb_release_fn release = (ahb_release_fn)hybris_dlsym(handle, "AHardwareBuffer_release");
+   ahb_send_handle_fn send_handle =
+      (ahb_send_handle_fn)hybris_dlsym(handle, "AHardwareBuffer_sendHandleToUnixSocket");
+   ahb_get_handle_fn get_handle =
+      (ahb_get_handle_fn)hybris_dlsym(handle, "AHardwareBuffer_getNativeHandle");
 
    /* The WSI layer requires exactly these two.  allocate/getNativeHandle are
-    * resolved opportunistically and fail cleanly if a vendor libandroid.so
-    * does not export them. */
-   if (api.release == NULL || api.send_handle == NULL)
+    * resolved opportunistically and fail cleanly if the library does not
+    * export them. */
+   if (release == NULL || send_handle == NULL)
    {
       if (debug_enabled())
       {
          fprintf(stderr,
-                 "ahb-wrapper: libandroid.so is missing %s%s%s\n",
-                 api.release == NULL ? "AHardwareBuffer_release" : "",
-                 (api.release == NULL && api.send_handle == NULL) ? ", " : "",
-                 api.send_handle == NULL ? "AHardwareBuffer_sendHandleToUnixSocket" : "");
+                 "ahb-wrapper: %s is missing %s%s%s\n",
+                 name,
+                 release == NULL ? "AHardwareBuffer_release" : "",
+                 (release == NULL && send_handle == NULL) ? ", " : "",
+                 send_handle == NULL ? "AHardwareBuffer_sendHandleToUnixSocket" : "");
       }
+      return 0;
+   }
+
+   api.allocate = allocate;
+   api.release = release;
+   api.send_handle = send_handle;
+   api.get_handle = get_handle;
+   if (debug_enabled())
+   {
+      fprintf(stderr, "ahb-wrapper: AHardwareBuffer entry points resolved from %s\n", name);
+   }
+   return 1;
+}
+
+static void load_api(void)
+{
+   if (load_from("libnativewindow.so"))
+   {
+      api_ready = 1;
       return;
    }
 
-   api_ready = 1;
-   if (debug_enabled())
+   if (load_from("libandroid.so"))
    {
-      fprintf(stderr, "ahb-wrapper: AHardwareBuffer entry points resolved\n");
+      api_ready = 1;
    }
 }
 

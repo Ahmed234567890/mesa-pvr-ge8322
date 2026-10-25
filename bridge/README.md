@@ -4,10 +4,10 @@ This is the vendor-HAL route for hardware Vulkan on the Samsung Galaxy A03
 Core (SM-A032F, SC9863A, PowerVR GE8322). It is separate from the Mesa `pvr`
 research in the rest of this repository.
 
-> **Status:** the display-independent `pvr-smoke` test passes on the phone
-> (SM-A032F, Android 14, stock bionic). It enumerates the PowerVR Rogue
-> GE8322 through the vendor HAL and reads back a rendered clear. X11
-> presentation with `vkcube` is the next step.
+> **Status:** verified on the phone (SM-A032F, Android 14, stock bionic).
+> `pvr-smoke` enumerates the PowerVR Rogue GE8322 through the vendor HAL and
+> reads back a rendered clear. `vkcube --c 120` renders and presents through
+> Termux:X11 using X11 DRI3/Present.
 
 ## Stack
 
@@ -29,11 +29,18 @@ Vulkan application (vkcube, glmark2, ...)
   /dev/dri/renderD128 + pvrsrvkm
 ```
 
-The WSI layer owns swapchains. It allocates Android hardware buffers, exports
-them as dma-buf file descriptors, and hands them to X11 through DRI3/Present.
-The vendor HAL has no `VK_KHR_xcb_surface` or `VK_EXT_headless_surface`, so
-the layer synthesizes its own opaque `VkSurfaceKHR` handles and never calls
-the ICD's surface entry points.
+The WSI layer owns swapchains. It asks the vendor HAL for an Android hardware
+buffer (`vkGetMemoryAndroidHardwareBufferANDROID`), exports it as a dma-buf
+file descriptor, and hands it to X11 through DRI3/Present. The
+`AHardwareBuffer_*` entry points are resolved through libhybris from
+`libnativewindow.so` by the preloaded `libahb-wrapper.so`. The vendor HAL has
+no `VK_KHR_xcb_surface` or `VK_EXT_headless_surface`, so the layer synthesizes
+its own opaque `VkSurfaceKHR` handles and never calls the ICD's surface entry
+points.
+
+The layer is installed as a Vulkan **implicit** layer. Applications such as
+`vkcube` query `VK_KHR_surface` while creating the instance, before they could
+enable an explicit layer by name.
 
 ## Why this route
 
@@ -53,10 +60,13 @@ the ICD's surface entry points.
 | `src/sysvk/` | ICD shim that opens the vendor `vulkan` HAL through `hw_get_module()` |
 | `src/ahb-wrapper/` | `AHardwareBuffer_*` entry points for the WSI layer, resolved through libhybris |
 | `src/pvr-smoke.c` | display-independent device, clear, and readback test |
+| `src/pvr-mount-private.c` | static `MS_PRIVATE\|MS_REC` helper for chroot bind mounts |
 | `cross/wsi-layer/` | patches against `xMeM/vulkan-wsi-layer@d5624d4` |
 | `cross/libhybris/` | bionic TLS compatibility patch for libhybris |
 | `cross/armhf-toolchain.cmake` | Arm GNU Toolchain cross-compilation definition |
 | `cross/stage.sh` | assembles the `/opt/pvr-bridge` bundle |
+| `cross/phone-test-device.sh` | installs the bundle and bind-mounts the Android trees |
+| `cross/phone-cleanup-device.sh` | detaches the bind mounts without touching the host |
 
 No binaries, vendor blobs, firmware, or kernel modules are stored here.
 
@@ -129,6 +139,7 @@ cd "$BUILD/vulkan-wsi-layer"
 git checkout d5624d42d8b2debbd910ad25662a05c751eb38b7
 git apply /path/to/mesa-pvr-ge8322/bridge/cross/wsi-layer/0001-build-cross-compile.patch
 git apply /path/to/mesa-pvr-ge8322/bridge/cross/wsi-layer/0002-layer-owned-surfaces.patch
+git apply /path/to/mesa-pvr-ge8322/bridge/cross/wsi-layer/0003-init-memory-properties.patch
 
 cmake -S . -B "$BUILD/build-wsi" \
   -DCMAKE_TOOLCHAIN_FILE=/path/to/mesa-pvr-ge8322/bridge/cross/armhf-toolchain.cmake \
@@ -144,7 +155,11 @@ cmake --build "$BUILD/build-wsi" -j"$(nproc)"
 
 The first patch adds the Android headers include path, removes the nonexistent
 `android` link target, and fixes the X11 designated-initializer order. The
-second makes X11 and headless surface creation layer-owned.
+second makes X11 and headless surface creation layer-owned. The third
+initializes `VkPhysicalDeviceMemoryProperties2` before passing it to
+`vkGetPhysicalDeviceMemoryProperties2KHR`; the vendor HAL walks the struct's
+`pNext` unconditionally, so an uninitialized stack value crashes it even
+though Mesa ignores `pNext`.
 
 ### 3. sysvk
 
@@ -171,6 +186,13 @@ cmake -S /path/to/mesa-pvr-ge8322/bridge/src/ahb-wrapper -B "$BUILD/build-ahb" \
 cmake --build "$BUILD/build-ahb" -j"$(nproc)"
 ```
 
+The shim tries `libnativewindow.so` first and only falls back to
+`libandroid.so`. On Android 14 `libandroid.so` is the framework hub: loading
+it pulls in `libandroid_runtime`, `libhwui`, and `libcrypto`, and the process
+aborts inside `libcrypto` before the AHB entry points can be used.
+`libnativewindow.so` exports all four `AHardwareBuffer_*` functions and loads
+cleanly through libhybris.
+
 ### 5. Smoke test
 
 ```sh
@@ -181,7 +203,19 @@ cmake --build "$BUILD/build-ahb" -j"$(nproc)"
   -Wl,-rpath-link,"$SYSROOT/usr/lib/arm-linux-gnueabihf" -lvulkan
 ```
 
-### 6. Bundle
+### 6. Mount helper
+
+Android's toybox `mount` does not implement `--make-rprivate` and fails
+silently, leaving recursive bind clones in the host's shared peer group.
+Build the static helper so the device scripts can call `mount(2)` directly:
+
+```sh
+"$TC/bin/arm-none-linux-gnueabihf-gcc" \
+  --sysroot="$SYSROOT" -static -O2 -o "$BUILD/pvr-mount-private" \
+  /path/to/mesa-pvr-ge8322/bridge/src/pvr-mount-private.c
+```
+
+### 7. Bundle
 
 ```sh
 BUILD="$BUILD" PREFIX=/opt/pvr-bridge \
@@ -207,6 +241,13 @@ needs these Android trees visible read-only:
 Do **not** bind-mount `/linkerconfig`. Without it, the Q linker falls back to
 permissive default search paths; Android's namespace configuration would
 block `/vendor/lib/hw`.
+
+Use `cross/phone-test-device.sh` to install the bundle and create the bind
+mounts. It calls `bin/pvr-mount-private` after every recursive bind, because
+toybox's `mount --make-rprivate` is unimplemented and silently leaves the
+clone in the host's shared peer group. Unmounting such a clone propagates to
+the host and can detach `/dev`, including binderfs. `phone-cleanup-device.sh`
+uses the same helper before detaching each tree.
 
 ## Test order
 
@@ -246,13 +287,35 @@ After the smoke test passes:
 ```
 
 Then start Termux:X11, bind its socket directory onto `/tmp/.X11-unix`, and
-run `vkcube`.
+run `vkcube`:
+
+```sh
+chroot /data/local/nhsystem/kali-armhf /usr/bin/env -i \
+  HOME=/root PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  DISPLAY=:0 /bin/bash -lc '. /opt/pvr-bridge/bin/pvr-env; vkcube --c 120'
+```
+
+Expected output:
+
+```text
+Selected WSI platform: xcb
+Selected GPU 0: PowerVR Rogue GE8322, type: IntegratedGpu
+```
+
+`vkcube` exits 0 after 120 frames and the cube is visible in the Termux:X11
+window. The environment script already sets `VK_ADD_IMPLICIT_LAYER_PATH` and
+the Mesa layer disable list; do not set `VK_INSTANCE_LAYERS` or `VK_LAYER_PATH`
+as well.
 
 ## Known limitations
 
 - **Termux:X11 only.** The layer presents through X11 DRI3/Present with
-  Android hardware buffers. It does not present into Xtigervnc or NetHunter
-  KeX; those need a readback/shared-memory WSI path.
+  Android hardware buffers and requires DRI3 1.2. Termux:X11 provides it;
+  Xtigervnc/KeX report DRI3 1.0 and need a readback/shared-memory WSI path.
+- **`libandroid.so` is unusable for AHB.** On Android 14 it pulls the whole
+  framework into the glibc process and aborts in `libcrypto`. The shim uses
+  `libnativewindow.so` instead and falls back to `libandroid.so` only if the
+  former lacks the symbols.
 - **Vendor HAL only.** This does not make Mesa's `pvr` driver work. The
   `pvrsrvkm` versus `drm/imagination` UAPI mismatch remains.
 - **32-bit armhf userspace.** The vendor HAL is 32-bit; the bridge is built

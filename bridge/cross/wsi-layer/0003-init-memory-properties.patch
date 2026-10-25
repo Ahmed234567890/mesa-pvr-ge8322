@@ -1,0 +1,24 @@
+diff --git a/wsi/x11/swapchain.cpp b/wsi/x11/swapchain.cpp
+--- a/wsi/x11/swapchain.cpp
++++ b/wsi/x11/swapchain.cpp
+@@ -559,6 +559,8 @@
+       reinterpret_cast<pfnAHardwareBuffer_release>(dlsym(RTLD_DEFAULT, "AHardwareBuffer_release"));
+    HardwareBuffer_sendHandleToUnixSocket = reinterpret_cast<pfnAHardwareBuffer_sendHandleToUnixSocket>(
+       dlsym(RTLD_DEFAULT, "AHardwareBuffer_sendHandleToUnixSocket"));
++   m_memory_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
++   m_memory_props.pNext = nullptr;
+    m_device_data.instance_data.disp.GetPhysicalDeviceMemoryProperties2KHR(m_device_data.physical_device,
+                                                                           &m_memory_props);
+    if (m_surface == nullptr || HardwareBuffer_sendHandleToUnixSocket == nullptr || HardwareBuffer_release == nullptr)
+diff --git a/wsi/x11/swapchain.hpp b/wsi/x11/swapchain.hpp
+--- a/wsi/x11/swapchain.hpp
++++ b/wsi/x11/swapchain.hpp
+@@ -164,7 +164,7 @@
+    uint64_t m_last_present_msc;
+ 
+    xcb_special_event_t *m_special_event;
+-   VkPhysicalDeviceMemoryProperties2 m_memory_props;
++   VkPhysicalDeviceMemoryProperties2 m_memory_props{};
+ 
+    xcb_pixmap_t create_pixmap(swapchain_image &image);
+ 

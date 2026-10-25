@@ -9,8 +9,9 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > Mesa `pvr` expects mainline `drm/imagination`. That kernel/firmware path is
 > the hard blocker.
 >
-> A separate vendor-HAL Vulkan bridge lives in [bridge/](bridge/). Its host
-> build is validated; on-device testing is pending.
+> A separate vendor-HAL Vulkan bridge lives in [bridge/](bridge/). It is
+> verified on the phone: `pvr-smoke` enumerates the PowerVR GE8322 through the
+> vendor HAL, and `vkcube` presents through Termux:X11.
 
 ## Start here
 
