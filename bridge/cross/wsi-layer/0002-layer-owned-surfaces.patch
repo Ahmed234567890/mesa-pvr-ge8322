@@ -1,0 +1,72 @@
+diff --git a/layer/surface_api.cpp b/layer/surface_api.cpp
+index c9793f4..415bc0b 100644
+--- a/layer/surface_api.cpp
++++ b/layer/surface_api.cpp
+@@ -168,7 +168,14 @@ wsi_layer_vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface,
+ {
+    auto &instance_data = layer::instance_private_data::get(instance);
+ 
+-   instance_data.disp.DestroySurfaceKHR(instance, surface, pAllocator);
++   /* Only forward destruction for surfaces the layer does not own (for
++    * example, VK_KHR_android_surface handles created by the ICD).  X11 and
++    * headless surfaces are layer-owned opaque handles with no ICD
++    * counterpart. */
++   if (!instance_data.does_layer_support_surface(surface))
++   {
++      instance_data.disp.DestroySurfaceKHR(instance, surface, pAllocator);
++   }
+ 
+    instance_data.remove_surface(
+       surface, util::allocator{ instance_data.get_allocator(), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT, pAllocator });
+diff --git a/wsi/headless/surface_properties.cpp b/wsi/headless/surface_properties.cpp
+index ffee087..842a619 100644
+--- a/wsi/headless/surface_properties.cpp
++++ b/wsi/headless/surface_properties.cpp
+@@ -166,14 +166,14 @@ CreateHeadlessSurfaceEXT(VkInstance instance, const VkHeadlessSurfaceCreateInfoE
+    {
+       return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+-   VkResult res = instance_data.disp.CreateHeadlessSurfaceEXT(instance, pCreateInfo, pAllocator, pSurface);
++
++   /* The Android vendor HAL has no VK_EXT_headless_surface.  Use the surface
++    * object itself as an opaque, unique VkSurfaceKHR. */
++   VkSurfaceKHR vk_surface = reinterpret_cast<VkSurfaceKHR>(wsi_surface.get());
++   VkResult res = instance_data.add_surface(vk_surface, wsi_surface);
+    if (res == VK_SUCCESS)
+    {
+-      res = instance_data.add_surface(*pSurface, wsi_surface);
+-      if (res != VK_SUCCESS)
+-      {
+-         instance_data.disp.DestroySurfaceKHR(instance, *pSurface, pAllocator);
+-      }
++      *pSurface = vk_surface;
+    }
+    return res;
+ }
+diff --git a/wsi/x11/surface_properties.cpp b/wsi/x11/surface_properties.cpp
+index 00c3d6c..b7e9308 100644
+--- a/wsi/x11/surface_properties.cpp
++++ b/wsi/x11/surface_properties.cpp
+@@ -193,15 +193,16 @@ CreateXcbSurfaceKHR(VkInstance instance, const VkXcbSurfaceCreateInfoKHR *pCreat
+    {
+       return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
++
++   /* The Android vendor HAL has no VK_KHR_xcb_surface.  The layer owns the
++    * swapchain and never passes this handle to the ICD, so use the surface
++    * object itself as an opaque, unique VkSurfaceKHR. */
++   VkSurfaceKHR vk_surface = reinterpret_cast<VkSurfaceKHR>(wsi_surface.get());
+    auto surface_base = util::unique_ptr<wsi::surface>(std::move(wsi_surface));
+-   VkResult res = instance_data.disp.CreateXcbSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
++   VkResult res = instance_data.add_surface(vk_surface, surface_base);
+    if (res == VK_SUCCESS)
+    {
+-      res = instance_data.add_surface(*pSurface, surface_base);
+-      if (res != VK_SUCCESS)
+-      {
+-         instance_data.disp.DestroySurfaceKHR(instance, *pSurface, pAllocator);
+-      }
++      *pSurface = vk_surface;
+    }
+    return res;
+ }

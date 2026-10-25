@@ -117,11 +117,11 @@ Vulkan wrapper, and the linker plugins (`q.so`, `o.so`, `n.so`, `mm.so`,
 git clone https://github.com/xMeM/vulkan-wsi-layer.git "$BUILD/vulkan-wsi-layer"
 cd "$BUILD/vulkan-wsi-layer"
 git checkout d5624d42d8b2debbd910ad25662a05c751eb38b7
-git apply /path/to/mesa-pvr-ge8322/bridge/build/wsi-layer/0001-build-cross-compile.patch
-git apply /path/to/mesa-pvr-ge8322/bridge/build/wsi-layer/0002-layer-owned-surfaces.patch
+git apply /path/to/mesa-pvr-ge8322/bridge/cross/wsi-layer/0001-build-cross-compile.patch
+git apply /path/to/mesa-pvr-ge8322/bridge/cross/wsi-layer/0002-layer-owned-surfaces.patch
 
 cmake -S . -B "$BUILD/build-wsi" \
-  -DCMAKE_TOOLCHAIN_FILE=/path/to/mesa-pvr-ge8322/bridge/build/armhf-toolchain.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/mesa-pvr-ge8322/bridge/cross/armhf-toolchain.cmake \
   -DARMHF_TOOLCHAIN="$TC" -DARMHF_SYSROOT="$SYSROOT" \
   -DANDROID_HEADERS_DIR="$BUILD/android-headers-30" \
   -DBUILD_WSI_X11=ON -DBUILD_WSI_HEADLESS=ON \
@@ -140,7 +140,7 @@ second makes X11 and headless surface creation layer-owned.
 
 ```sh
 cmake -S /path/to/mesa-pvr-ge8322/bridge/src/sysvk -B "$BUILD/build-sysvk" \
-  -DCMAKE_TOOLCHAIN_FILE=/path/to/mesa-pvr-ge8322/bridge/build/armhf-toolchain.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/mesa-pvr-ge8322/bridge/cross/armhf-toolchain.cmake \
   -DARMHF_TOOLCHAIN="$TC" -DARMHF_SYSROOT="$SYSROOT" \
   -DANDROID_HEADERS_DIR="$BUILD/android-headers-30" \
   -DHYBRIS_LIBRARY_DIR="$BUILD/libhybris/hybris/hardware/.libs" \
@@ -153,7 +153,7 @@ cmake --build "$BUILD/build-sysvk" -j"$(nproc)"
 
 ```sh
 cmake -S /path/to/mesa-pvr-ge8322/bridge/src/ahb-wrapper -B "$BUILD/build-ahb" \
-  -DCMAKE_TOOLCHAIN_FILE=/path/to/mesa-pvr-ge8322/bridge/build/armhf-toolchain.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/mesa-pvr-ge8322/bridge/cross/armhf-toolchain.cmake \
   -DARMHF_TOOLCHAIN="$TC" -DARMHF_SYSROOT="$SYSROOT" \
   -DHYBRIS_INCLUDE_DIR="$BUILD/libhybris/hybris/include/hybris" \
   -DHYBRIS_LIBRARY_DIR="$BUILD/libhybris/hybris/common/.libs" \
@@ -175,7 +175,7 @@ cmake --build "$BUILD/build-ahb" -j"$(nproc)"
 
 ```sh
 BUILD="$BUILD" PREFIX=/opt/pvr-bridge \
-  /path/to/mesa-pvr-ge8322/bridge/build/stage.sh
+  /path/to/mesa-pvr-ge8322/bridge/cross/stage.sh
 ```
 
 The result is `$BUILD/stage`, about 8 MB unstripped. It contains only the

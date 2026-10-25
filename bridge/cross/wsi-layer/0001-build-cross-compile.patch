@@ -1,0 +1,64 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 96af204..ceb7a4f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -60,6 +60,7 @@ option(BUILD_WSI_HEADLESS "Build with support for VK_EXT_headless_surface" ON)
+ option(BUILD_WSI_X11 "Build with support for VK_KHR_xcb_surface" ON)
+ option(BUILD_WSI_WAYLAND "Build with support for VK_KHR_wayland_surface" OFF)
+ option(BUILD_WSI_DISPLAY "Build with support for VK_KHR_display" OFF)
++set(ANDROID_HEADERS_DIR "" CACHE PATH "Path to Android platform headers")
+ 
+ set(SELECT_EXTERNAL_ALLOCATOR "none" CACHE STRING "Select an external system allocator (none, ion)")
+ set(EXTERNAL_WSIALLOC_LIBRARY "" CACHE STRING "External implementation of the wsialloc interface to use")
+@@ -251,10 +252,11 @@ if(BUILD_WSI_X11)
+    target_include_directories(wsi_x11 PRIVATE
+       ${PROJECT_SOURCE_DIR}
+       ${VULKAN_CXX_INCLUDE}
++      ${ANDROID_HEADERS_DIR}
+       ${CMAKE_CURRENT_BINARY_DIR})
+ 
+    target_compile_options(wsi_x11 INTERFACE "-DBUILD_WSI_X11=1")
+-   list(APPEND LINK_WSI_LIBS wsi_x11 xcb xcb-present xcb-xfixes xcb-dri3 X11-xcb android)
++   list(APPEND LINK_WSI_LIBS wsi_x11 xcb xcb-present xcb-xfixes xcb-dri3 X11-xcb)
+ else()
+    list(APPEND JSON_COMMANDS COMMAND sed -i '/VK_KHR_xcb_surface/d' ${CMAKE_CURRENT_BINARY_DIR}/VkLayer_window_system_integration.json)
+    list(APPEND JSON_COMMANDS COMMAND sed -i '/VK_KHR_xlib_surface/d' ${CMAKE_CURRENT_BINARY_DIR}/VkLayer_window_system_integration.json)
+diff --git a/util/custom_allocator.hpp b/util/custom_allocator.hpp
+index a34164a..64a8247 100644
+--- a/util/custom_allocator.hpp
++++ b/util/custom_allocator.hpp
+@@ -28,6 +28,7 @@
+ #include <string>
+ #include <cassert>
+ #include <memory>
++#include <stdexcept>
+ 
+ #include <vulkan/vulkan.h>
+ 
+diff --git a/wsi/x11/surface_properties.cpp b/wsi/x11/surface_properties.cpp
+index b27ea1d..00c3d6c 100644
+--- a/wsi/x11/surface_properties.cpp
++++ b/wsi/x11/surface_properties.cpp
+@@ -284,8 +284,8 @@ CreateXlibSurfaceKHR(VkInstance instance, const VkXlibSurfaceCreateInfoKHR *pCre
+ {
+    const VkXcbSurfaceCreateInfoKHR CreateInfo = {
+       .sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
+-      .flags = 0,
+       .pNext = NULL,
++      .flags = 0,
+       .connection = XGetXCBConnection(pCreateInfo->dpy),
+       .window = static_cast<xcb_window_t>(pCreateInfo->window),
+    };
+diff --git a/wsi/x11/swapchain.cpp b/wsi/x11/swapchain.cpp
+index 89a6c2f..5b36ef4 100644
+--- a/wsi/x11/swapchain.cpp
++++ b/wsi/x11/swapchain.cpp
+@@ -35,6 +35,8 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <ctime>
++#include <new>
++#include <system_error>
+ 
+ #include <dlfcn.h>
+ #include <fcntl.h>
