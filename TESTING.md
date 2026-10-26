@@ -225,3 +225,25 @@ repository.
 Proprietary vendor libraries, the downloaded package, executables, and cores
 remain outside this repository. See [opengl/README.md](opengl/README.md) for
 evidence and next steps.
+
+## XFCE and Minecraft on Termux:X11
+
+On 2026-10-26, the existing Kali XFCE session was started on Termux:X11 display
+`:1` without installing/removing Kali packages. The XFCE panel configuration
+had an unavailable `null` plugin; removing that invalid panel entry allowed
+the desktop to appear. Prism Launcher 11.1.1 was open on the XFCE desktop. Its
+title bar was initially obscured by the top panel; moving the window below the
+panel restored normal dragging.
+
+The Prism `1.12.2` instance reached the **Play Demo** flow with a demo player
+name. Launch was tested using the staged ARMHF Java 21 runtime, Prism's Java
+compatibility bypass, and a 384 MiB maximum heap. It still exited before
+rendering, with a Java security-provider stack trace and process exit code 2;
+Prism reports that this instance requires Java 8. Therefore neither the
+Minecraft menu nor 1.12.2 rendering on the GE8322 has been verified. See
+[TERMUX-X11-DESKTOP.md](TERMUX-X11-DESKTOP.md) for the XFCE startup procedure,
+window recovery, privacy boundary, and next steps.
+
+This XFCE result means the desktop session is visible on Termux:X11; it is not
+evidence that XFCE is GPU-rendered. The separate vendor GLES and Mesa results
+above remain distinct.

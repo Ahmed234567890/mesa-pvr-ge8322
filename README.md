@@ -30,6 +30,8 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
   blockers, and ordered next tests
 - [opengl/README.md](opengl/README.md) — vendor GLES/libhybris bring-up, smoke
   tests, X11 blocker, and next work
+- [TERMUX-X11-DESKTOP.md](TERMUX-X11-DESKTOP.md) — XFCE startup and Prism/Minecraft
+  status on the phone's Termux:X11 display
 - [bridge/README.md](bridge/README.md) — vendor Vulkan HAL → libhybris →
   WSI layer → X11 bridge
 - [ge8322/vendor-features.md](ge8322/vendor-features.md) — decoded vendor DDK
