@@ -18,7 +18,10 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > scene (FIFO/vsync-capped). These results do not establish Mesa rendering or
 > accelerated Kali desktop/OpenGL support. Do not confuse them with Mesa ICD
 > results. Preliminary vendor GLES via libhybris can render/read back an
-> offscreen pbuffer, but creating an X11 EGL window currently segfaults.
+> offscreen pbuffer. A custom X11 window probe segfaults. `glmark2-es2-x11`
+> validation identifies the GE8322 and passes most scenes, but timed
+> swap/presentation and shutdown still crash. Normal `glmark2` runs report
+> llvmpipe rather than hardware acceleration.
 
 ## Start here
 

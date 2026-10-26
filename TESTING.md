@@ -18,7 +18,10 @@ readiness or Vulkan conformance.
 | Render/readback | No successful Mesa submission/readback verified | Vendor clear-only render/readback passed; not a Mesa result |
 | Full `vkmark` suite | Not run: Mesa queue-submit and swapchain paths are blocked | Pass; score 60, each scene 60 FPS with FIFO/vsync |
 | OpenGL ES pbuffer | Mesa Zink/OpenGL not tested | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, GLES 3.2, readback `64 128 191 255` |
-| OpenGL ES X11 window | Mesa path not tested | Fail: X11/EGL setup reaches `eglCreateWindowSurface`, then segfaults |
+| OpenGL ES X11 smoke probe | Mesa path not tested | Fails after entering `eglCreateWindowSurface`; PC maps to stripped Kali `libX11.so.6.4.0 + 0x39886`, exact function unresolved |
+| `glmark2-es2-x11 --validate` via vendor GLES | Mesa path not tested | Reports GE8322 and validates most scenes, but exits with SIGSEGV |
+| `glmark2-es2-x11` timed scene via vendor GLES | Mesa path not tested | Default swap crashes; `--frame-end none/finish/readpixels` emits diagnostic scores but crashes during shutdown |
+| `glmark2-es2 --off-screen --validate` via default EGL | Reports Mesa llvmpipe | Most validation cases pass; software GLES, not GE8322 |
 
 `vulkaninfo --summary` reported API `1.2.363`, device `PowerVR Rogue GE8322`,
 and conformance version `1.4.3.3`. The latter is a driver-reported property,
@@ -198,14 +201,21 @@ inside the Kali chroot, render a clear, and read back `64 128 191 255`; the
 reported renderer is `PowerVR Rogue GE8322`. This is verified **vendor GLES**
 execution and is not Mesa/Zink or desktop-window acceleration.
 
-The X11 variant opens `DISPLAY=:1`, initializes EGL, chooses a config, and
-creates/maps an X window, but the process segfaults during
-`eglCreateWindowSurface`. Disabling MIT-SHM did not change the result. The
-core now resolves the faulting PC to Xlib's `_XimDecodeICATTRIBUTE+262` in
-Kali's `libX11.so.6.4.0`; the remaining backtrace is corrupt, so the exact
-caller is not established. This localizes the fault to Xlib during the window
-surface path, not yet to a confirmed cause or to the PowerVR driver. The
-installed Kali `glmark2` binary uses GLX and is not a valid GLES/libhybris
-benchmark for this path. See [opengl/README.md](opengl/README.md) for the probe,
-environment, evidence paths, and next steps. Proprietary vendor libraries and
-test binaries remain outside this repository.
+The custom X11 probe opens `DISPLAY=:1`, initializes EGL, chooses a config, and
+creates/maps an X window, but crashes after entering `eglCreateWindowSurface`.
+Disabling MIT-SHM or changing locale/input-method variables did not change the
+result. Its PC maps into stripped Kali `libX11.so.6.4.0 + 0x39886`; an earlier
+`_XimDecodeICATTRIBUTE` label was caused by an incorrect GDB section relocation
+and is withdrawn. The exact function/caller remains unresolved.
+
+The `glmark2-es2-x11` package was downloaded and extracted only into private
+staging (not installed into Kali). Its vendor GLES path reports GE8322 and
+validates most scenes, but the validation process later segfaults. A timed
+`build` scene crashes with normal swap; `--frame-end none`, `finish`, or
+`readpixels` emits diagnostic scores but still crashes during shutdown. These
+are not valid benchmark scores or verified visible presentation. The regular
+GLX `glmark2 --validate` and default-EGL `glmark2-es2 --off-screen --validate`
+report Mesa `llvmpipe`, so those successful runs are software-rendered.
+Proprietary vendor libraries, the downloaded package, executables, and cores
+remain outside this repository. See [opengl/README.md](opengl/README.md) for
+evidence and next steps.

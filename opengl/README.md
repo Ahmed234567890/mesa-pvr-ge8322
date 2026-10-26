@@ -53,24 +53,32 @@ published here.
 |---|---|---|
 | Android SurfaceFlinger GLES | Reports Imagination / GE8322 / GLES 3.2 | Confirms Android's system compositor uses the hardware GLES driver |
 | Kali chroot + libhybris EGL/GLES + null platform + pbuffer | **Pass**; renderer is GE8322; clear/readback is `64 128 191 255` | Vendor GPU GLES rendering works offscreen from a glibc armhf process |
-| Kali chroot + libhybris X11 EGL window | **Fail**; segfault during `eglCreateWindowSurface` after X display, EGL init/config selection, and X window creation succeeded | The X11 native-window bridge is currently the blocker for visible GLES windows |
+| Kali chroot + libhybris X11 EGL window smoke probe | **Fail**; segfault after entering `eglCreateWindowSurface` | The custom X11 native-window probe remains blocked |
+| `glmark2-es2-x11 --validate` + vendor GLES | Reports GE8322; most validation cases pass; process later segfaults | App-level EGL/GLES validation reaches the vendor GPU, but is not a clean exit or timed benchmark |
+| `glmark2-es2-x11 --benchmark build` + default swap | Reports GE8322, then segfaults at the first timed scene before FPS output | Normal frame presentation remains blocked |
+| Same timed `build` scene with `--frame-end none` | Emits FPS 1518 / score 1517, then segfaults during shutdown | Diagnostic rendering without presentation only; not a valid benchmark score |
+| Same timed `build` scene with `--frame-end finish` | Emits FPS 443 / score 442, then segfaults during shutdown | Diagnostic render/finish path; not a clean benchmark run |
+| Kali `glmark2 --validate` (GLX) | Most validation cases pass; reports Mesa `llvmpipe` | Software rendering only; not GE8322 acceleration |
+| Kali `glmark2-es2 --off-screen --validate` (default Mesa EGL) | Most validation cases pass; reports Mesa `llvmpipe` | Software GLES only; not GE8322 acceleration |
 | Mesa `pvr` OpenGL/Zink | Not tested | Mesa Vulkan submit and WSI failures remain; vendor GLES results do not imply Mesa support |
 | Kali desktop acceleration | Not tested / not working evidence | No desktop or compositor has been verified using this GLES path |
 
-The X11 crash has been reproduced with core dumps enabled and the PC symbolized
-against the matching armhf Kali Xlib:
+The custom X11 smoke crash has been reproduced with core dumps enabled. Its PC
+maps into Kali's stripped armhf `libX11.so.6.4.0`:
 
 ```text
 SIGSEGV at 0xf3039886
-libX11.so.6.4.0: _XimDecodeICATTRIBUTE + 262
+libX11.so.6.4.0 + 0x39886 (ELF virtual address)
 Build ID: 8e27db7a5a6d2390f8ce81f94234de30428efb17
 ```
 
 The core's backtrace ends immediately after this frame with a corrupt/invalid
-caller frame (`lr=0`); thus it identifies the faulting Xlib routine, but not the
-exact caller or whether Xlib received malformed state from the shim. It is not
-yet evidence of a PowerVR driver crash. The core is private because it contains
-process memory; it is stored under `$HOME/pvr-reverse/cases/ge8322-opengl/evidence/`.
+caller frame (`lr=0`). The library is stripped, so the exact Xlib function is
+unresolved. An earlier `_XimDecodeICATTRIBUTE` label was incorrect: GDB was
+given the ELF load bias as the `.text` address, shifting its symbol lookup. The
+PC is in Xlib, but the exact operation/cause is unknown; this is not evidence of
+a PowerVR driver crash. The core remains private because it contains process
+memory and is stored under `$HOME/pvr-reverse/cases/ge8322-opengl/evidence/`.
 
 The pbuffer run emitted non-fatal lookup warnings for `libui_compat_layer.so`
 and `/system/vendor/lib/egl/libGL_powervr.so`, but still completed with the
@@ -86,10 +94,24 @@ also depends on the vendor GLSL compiler and USC compiler libraries. This is an
 initial linkage map, not a full function-level reconstruction. The full local
 symbol survey is `evidence/vendor-symbol-survey.txt`.
 
-The installed Kali `glmark2` executable was inspected and found to use GLX
-(`libGL.so` / `glX*` symbols). It is not a direct EGL/GLES test for this
-libhybris path. A GLES benchmark should wait until X11 EGL window creation and
-presentation work.
+The installed Kali `glmark2` executable uses GLX (`libGL.so` / `glX*`) and
+reports llvmpipe. The `glmark2-es2-x11` executable was downloaded and extracted
+to private staging only (not installed into Kali). Its validation and timed
+tests use the vendor GLES driver, but swap/shutdown failures mean a successful
+visible GLES application is not yet established.
+
+Dynamic-loading applications initially failed because the built
+`libhybris-common.so.1.0.0` requests an executable stack and glibc refuses to
+`dlopen()` it. Clearing the executable-stack flag on an isolated staged copy
+made `dlopen(libEGL.so)` and `dlopen(libGLESv2.so)` succeed; the libhybris build
+tree and Kali's default libraries were left unchanged. This is a staging
+workaround, not yet a general packaging fix. Reproduce the private copy with:
+
+```sh
+./opengl/stage-dlopen-safe-common.sh \
+  "$LIBHYBRIS_BUILD/hybris/common/.libs/libhybris-common.so.1.0.0" \
+  "$HOME/pvr-reverse/cases/ge8322-opengl/build/opengl-stage/lib/libhybris-common.so.1.0.0"
+```
 
 ## Build the diagnostic probes
 
@@ -167,24 +189,27 @@ evidence at `evidence/egl-gles2-x11-smoke.log`.
 
 ## Blockers and next work
 
-1. **X11 surface crash:** the PC resolves to Xlib's `_XimDecodeICATTRIBUTE`,
-   and the core's remaining caller chain is corrupt. Add stage logging or
-   breakpoints around libhybris `X11NativeWindow` creation (window attributes,
-   GC, Present event registration, and buffer setup) to identify which Xlib
-   operation reaches XIM decoding. Compare a minimal Xlib-only reproducer and
-   inspect Xlib locale/input-method configuration before changing the vendor
-   ABI.
-2. **Native-window compatibility:** compare Android's real `ANativeWindow`
+1. **X11 smoke-probe crash:** PC maps to stripped Xlib at `+0x39886`; the
+   caller chain is corrupt. GLmark2's canvas initializes and validates most
+   scenes, so compare its canvas/window creation with the custom probe. Add
+   stage logging around libhybris `X11NativeWindow` creation, buffer setup, swap,
+   and teardown.
+2. **Swap/benchmark crash:** default GLmark2 swap crashes at the first timed
+   scene. `--frame-end none`, `finish`, and `readpixels` emit a scene result but
+   still crash during shutdown. Capture a dedicated core at each stage and
+   isolate presentation from teardown before claiming visible acceleration.
+3. **Native-window compatibility:** compare Android's real `ANativeWindow`
    contract and gralloc/mapper behavior with libhybris's X11 shim. Test a
    safer bridge (for example, rendering to an Android-compatible buffer and
    presenting it through X11 DRI3) if direct window surfaces are not viable.
-3. **GLES benchmark:** after X11 surfaces work, run a GLES2 benchmark and
-   verify both `GL_RENDERER` and visible output. Do not use the current GLX
-   `glmark2` binary as evidence for this path.
-4. **Desktop:** test a small X11 application, then a lightweight desktop with
+4. **GLES benchmark:** once swap and shutdown are clean, run the full timed
+   GLES2 suite and verify `GL_RENDERER` plus visible output. Current no-swap
+   numbers are diagnostic only. Do not use GLX `glmark2` as evidence for this
+   vendor GLES path.
+5. **Desktop:** test a small X11 application, then a lightweight desktop with
    compositing disabled. Verify renderer strings per process; avoid claiming
    acceleration if apps fall back to `llvmpipe`/`softpipe`.
-5. **Mesa OpenGL:** keep this separate. Mesa `pvr` is Vulkan-focused and its
+6. **Mesa OpenGL:** keep this separate. Mesa `pvr` is Vulkan-focused and its
    queue submit/swapchain paths still fail. Do not replace Kali's default GL or
    Vulkan drivers; retain the vendor paths as fallback.
 
@@ -202,6 +227,14 @@ libhybris build log. Relevant files include:
 - `evidence/egl-gles2-x11-smoke.log`
 - `evidence/egl-gles2-x11-disable-shm.log`
 - `evidence/egl-gles2-x11-locale-none.log`
+- `evidence/glmark2-default-validate.log` (GLX / llvmpipe)
+- `evidence/glmark2-es2-default-offscreen.log` (EGL/GLES / llvmpipe)
+- `evidence/glmark2-es2-vendor-x11-validate.log`
+- `evidence/glmark2-es2-vendor-build.log`
+- `evidence/glmark2-es2-vendor-build-frame-none.log`
+- `evidence/glmark2-es2-vendor-build-frame-finish.log`
+- `evidence/glmark2-es2-vendor-build-frame-readpixels.log`
+- `evidence/egl-loader-smoke.log` (dynamic-loader failure and isolated workaround)
 - `evidence/x11-smoke.core` (private process-memory dump)
 - `evidence/libhybris-egl-build.log`
 
