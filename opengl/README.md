@@ -57,11 +57,27 @@ published here.
 | Mesa `pvr` OpenGL/Zink | Not tested | Mesa Vulkan submit and WSI failures remain; vendor GLES results do not imply Mesa support |
 | Kali desktop acceleration | Not tested / not working evidence | No desktop or compositor has been verified using this GLES path |
 
+The X11 crash has been reproduced with core dumps enabled and the PC symbolized
+against the matching armhf Kali Xlib:
+
+```text
+SIGSEGV at 0xf3039886
+libX11.so.6.4.0: _XimDecodeICATTRIBUTE + 262
+Build ID: 8e27db7a5a6d2390f8ce81f94234de30428efb17
+```
+
+The core's backtrace ends immediately after this frame with a corrupt/invalid
+caller frame (`lr=0`); thus it identifies the faulting Xlib routine, but not the
+exact caller or whether Xlib received malformed state from the shim. It is not
+yet evidence of a PowerVR driver crash. The core is private because it contains
+process memory; it is stored under `$HOME/pvr-reverse/cases/ge8322-opengl/evidence/`.
+
 The pbuffer run emitted non-fatal lookup warnings for `libui_compat_layer.so`
 and `/system/vendor/lib/egl/libGL_powervr.so`, but still completed with the
 PowerVR renderer and correct readback. The X11 window failure also reproduced
-with `HYBRIS_X11_DISABLE_SHM=1`; MIT-SHM alone is therefore not yet a confirmed
-cause.
+with `HYBRIS_X11_DISABLE_SHM=1` and with `LC_ALL=C XMODIFIERS=@im=none`; neither
+disabling MIT-SHM nor changing locale/input-method environment variables
+avoided the crash.
 
 Static import/export triage shows `libEGL_powervr.so` exports standard `egl*`
 entry points that delegate to `IMGegl*` symbols in `libIMGegl.so`. GLES modules
@@ -151,9 +167,13 @@ evidence at `evidence/egl-gles2-x11-smoke.log`.
 
 ## Blockers and next work
 
-1. **X11 surface crash:** isolate whether the crash is inside libhybris's
-   `X11NativeWindow` creation/buffer allocation or the vendor `eglCreateWindowSurface`
-   implementation. Obtain a usable stack trace before changing the vendor ABI.
+1. **X11 surface crash:** the PC resolves to Xlib's `_XimDecodeICATTRIBUTE`,
+   and the core's remaining caller chain is corrupt. Add stage logging or
+   breakpoints around libhybris `X11NativeWindow` creation (window attributes,
+   GC, Present event registration, and buffer setup) to identify which Xlib
+   operation reaches XIM decoding. Compare a minimal Xlib-only reproducer and
+   inspect Xlib locale/input-method configuration before changing the vendor
+   ABI.
 2. **Native-window compatibility:** compare Android's real `ANativeWindow`
    contract and gralloc/mapper behavior with libhybris's X11 shim. Test a
    safer bridge (for example, rendering to an Android-compatible buffer and
@@ -181,6 +201,8 @@ libhybris build log. Relevant files include:
 - `evidence/egl-gles2-smoke-repeat.log`
 - `evidence/egl-gles2-x11-smoke.log`
 - `evidence/egl-gles2-x11-disable-shm.log`
+- `evidence/egl-gles2-x11-locale-none.log`
+- `evidence/x11-smoke.core` (private process-memory dump)
 - `evidence/libhybris-egl-build.log`
 
 Only source probes and non-proprietary findings are tracked in this repository.

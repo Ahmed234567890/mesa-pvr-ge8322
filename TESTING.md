@@ -201,6 +201,10 @@ execution and is not Mesa/Zink or desktop-window acceleration.
 The X11 variant opens `DISPLAY=:1`, initializes EGL, chooses a config, and
 creates/maps an X window, but the process segfaults during
 `eglCreateWindowSurface`. Disabling MIT-SHM did not change the result. The
+core now resolves the faulting PC to Xlib's `_XimDecodeICATTRIBUTE+262` in
+Kali's `libX11.so.6.4.0`; the remaining backtrace is corrupt, so the exact
+caller is not established. This localizes the fault to Xlib during the window
+surface path, not yet to a confirmed cause or to the PowerVR driver. The
 installed Kali `glmark2` binary uses GLX and is not a valid GLES/libhybris
 benchmark for this path. See [opengl/README.md](opengl/README.md) for the probe,
 environment, evidence paths, and next steps. Proprietary vendor libraries and
