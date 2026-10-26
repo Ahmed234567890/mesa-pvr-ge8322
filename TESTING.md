@@ -17,6 +17,8 @@ readiness or Vulkan conformance.
 | `vkcube` on Termux:X11 `:1` | Fail: swapchain ioctl ID 11 / func 2 returns `EINVAL`; aborts before verified rendering | Pass; visible cube verified |
 | Render/readback | No successful Mesa submission/readback verified | Vendor clear-only render/readback passed; not a Mesa result |
 | Full `vkmark` suite | Not run: Mesa queue-submit and swapchain paths are blocked | Pass; score 60, each scene 60 FPS with FIFO/vsync |
+| OpenGL ES pbuffer | Mesa Zink/OpenGL not tested | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, GLES 3.2, readback `64 128 191 255` |
+| OpenGL ES X11 window | Mesa path not tested | Fail: X11/EGL setup reaches `eglCreateWindowSurface`, then segfaults |
 
 `vulkaninfo --summary` reported API `1.2.363`, device `PowerVR Rogue GE8322`,
 and conformance version `1.4.3.3`. The latter is a driver-reported property,
@@ -187,3 +189,19 @@ The vendor baseline is a useful working fallback, not evidence that the Mesa
 driver is fixed, upstreamed, conformant, or capable of rendering the Kali
 desktop. No Mesa Vulkan CTS result or full desktop acceleration result is
 available.
+
+## OpenGL/GLES progress
+
+The phone reports a vendor OpenGL ES 3.2 driver for the GE8322. A separately
+staged libhybris EGL/GLES path in `/opt/pvr-bridge/opengl` can create a pbuffer
+inside the Kali chroot, render a clear, and read back `64 128 191 255`; the
+reported renderer is `PowerVR Rogue GE8322`. This is verified **vendor GLES**
+execution and is not Mesa/Zink or desktop-window acceleration.
+
+The X11 variant opens `DISPLAY=:1`, initializes EGL, chooses a config, and
+creates/maps an X window, but the process segfaults during
+`eglCreateWindowSurface`. Disabling MIT-SHM did not change the result. The
+installed Kali `glmark2` binary uses GLX and is not a valid GLES/libhybris
+benchmark for this path. See [opengl/README.md](opengl/README.md) for the probe,
+environment, evidence paths, and next steps. Proprietary vendor libraries and
+test binaries remain outside this repository.

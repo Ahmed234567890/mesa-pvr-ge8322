@@ -17,13 +17,16 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > Termux:X11. A full vendor-driver `vkmark` run also completed at 60 FPS per
 > scene (FIFO/vsync-capped). These results do not establish Mesa rendering or
 > accelerated Kali desktop/OpenGL support. Do not confuse them with Mesa ICD
-> results.
+> results. Preliminary vendor GLES via libhybris can render/read back an
+> offscreen pbuffer, but creating an X11 EGL window currently segfaults.
 
 ## Start here
 
 - [GE8322.md](GE8322.md) — hardware details, current findings, blockers, roadmap
 - [TESTING.md](TESTING.md) — verified Mesa/vendor test results, vkmark baseline,
   blockers, and ordered next tests
+- [opengl/README.md](opengl/README.md) — vendor GLES/libhybris bring-up, smoke
+  tests, X11 blocker, and next work
 - [bridge/README.md](bridge/README.md) — vendor Vulkan HAL → libhybris →
   WSI layer → X11 bridge
 - [ge8322/vendor-features.md](ge8322/vendor-features.md) — decoded vendor DDK
