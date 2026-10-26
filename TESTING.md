@@ -91,15 +91,21 @@ OpenGL or a first-of-its-kind result without sufficient evidence.
 
 ## Latest phone retest
 
-On 2026-10-26, the checks were repeated over ADB on the phone. The vendor
-`pvr-smoke` passed and read back `64 128 191 255`. Mesa `vulkaninfo --summary`
-exited successfully (with an `XDG_RUNTIME_DIR` warning) and identified the
-GE8322. Mesa `pvr-smoke` again failed at RGXTQ func 3 with `EINVAL`, and Mesa
-`vkcube` exited with SIGSEGV after selecting Xlib.
+On 2026-10-26, the checks were repeated over ADB. The vendor `pvr-smoke`
+passed and read back `64 128 191 255`. Mesa `vulkaninfo --summary` exited
+successfully (with an `XDG_RUNTIME_DIR` warning) and identified the GE8322.
+Mesa `pvr-smoke` again failed at RGXTQ func 3 with `EINVAL`.
 
-The Termux:X11 `X0` socket was bind-mounted into the chroot and was visible
-there, but `xdpyinfo` could not open display `:0`; the vendor `vkcube` control
-also segfaulted in that run. Therefore this retest does **not** validate the
-current X11 presentation setup. The earlier vendor-HAL Termux:X11 success
-remains a separate historical result. Check X server access/socket setup before
-using `vkcube` to judge Mesa WSI.
+Termux:X11 display `:0` was stale and refused new clients. Starting a fresh
+display `:1` from the Termux terminal made `xdpyinfo` succeed. The chroot also
+needed its existing `/dev/binderfs` directory bind-mounted from Android; this
+resolved the vendor WSI error `Binder driver '/dev/binder' could not be
+opened`. With these two fixes, vendor `vkcube --c 120` exited 0, and a live
+vendor cube was observed on the phone screen. This is the vendor-HAL control,
+not Mesa rendering.
+
+On display `:1`, Mesa `vkcube --c 120` created the device and dummy HWRT, then
+failed swapchain setup: bridge ioctl ID 11 / func 2 returned `EINVAL` twice,
+and `vkcube` aborted at `demo_prepare_swapchain`. Mesa still has no verified
+rendered output. The next Mesa blocker is this WSI/DRI3 ioctl path; queue submit
+is independently blocked by RGXTQ func 3 `EINVAL` in `pvr-smoke`.
