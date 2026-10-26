@@ -14,8 +14,9 @@ readiness or Vulkan conformance.
 | `vkCreateDevice` | Pass | Pass |
 | Dummy HWRT dataset, RGXTA3D func 16 | Pass; kernel returns handles `0x53` and `0x54` in the captured run | Vendor func 16 captures succeeded |
 | Queue submit | Fail: RGXTQ func 3 ioctl returns `-1`, `errno=22` (`EINVAL`); `pvr-smoke` reports `vkQueueSubmit` failure `-4` | Vendor bridge `pvr-smoke` has passed on its supported path |
-| `vkcube` on Termux:X11 | Fail: selects Xlib then segfaults | Pass, previously verified |
+| `vkcube` on Termux:X11 `:1` | Fail: swapchain ioctl ID 11 / func 2 returns `EINVAL`; aborts before verified rendering | Pass; visible cube verified |
 | Render/readback | No successful Mesa submission/readback verified | Vendor clear-only render/readback passed; not a Mesa result |
+| Full `vkmark` suite | Not run: Mesa queue-submit and swapchain paths are blocked | Pass; score 60, each scene 60 FPS with FIFO/vsync |
 
 `vulkaninfo --summary` reported API `1.2.363`, device `PowerVR Rogue GE8322`,
 and conformance version `1.4.3.3`. The latter is a driver-reported property,
@@ -107,5 +108,82 @@ not Mesa rendering.
 On display `:1`, Mesa `vkcube --c 120` created the device and dummy HWRT, then
 failed swapchain setup: bridge ioctl ID 11 / func 2 returned `EINVAL` twice,
 and `vkcube` aborted at `demo_prepare_swapchain`. Mesa still has no verified
-rendered output. The next Mesa blocker is this WSI/DRI3 ioctl path; queue submit
-is independently blocked by RGXTQ func 3 `EINVAL` in `pvr-smoke`.
+rendered output. Queue submit is independently blocked by RGXTQ func 3 `EINVAL`
+in `pvr-smoke`.
+
+The same day, `vkmark` 2025.01-1 (ARMHF) was staged with its runtime libraries
+under the phone's `/opt/pvr-bridge/vkmark` directory; no packages were
+installed into Kali and no benchmark binaries or vendor files were added to
+this repository. With Termux:X11 `:1`, the vendor-HAL ICD, XCB winsys, a
+480x800 window, and FIFO presentation, the complete default suite completed:
+
+```text
+[vertex] device-local=true: FPS: 60 FrameTime: 16.667 ms
+[vertex] device-local=false: FPS: 60 FrameTime: 16.667 ms
+[texture] anisotropy=0: FPS: 60 FrameTime: 16.667 ms
+[texture] anisotropy=16: FPS: 60 FrameTime: 16.667 ms
+[shading] shading=gouraud: FPS: 60 FrameTime: 16.667 ms
+[shading] shading=blinn-phong-inf: FPS: 60 FrameTime: 16.667 ms
+[shading] shading=phong: FPS: 60 FrameTime: 16.667 ms
+[shading] shading=cel: FPS: 60 FrameTime: 16.667 ms
+[effect2d] kernel=edge: FPS: 60 FrameTime: 16.667 ms
+[effect2d] kernel=blur: FPS: 60 FrameTime: 16.667 ms
+[desktop] <default>: FPS: 60 FrameTime: 16.667 ms
+[cube] <default>: FPS: 60 FrameTime: 16.667 ms
+[clear] <default>: FPS: 60 FrameTime: 16.667 ms
+                                   vkmark Score: 60
+```
+
+This vendor score is capped by the selected FIFO/vsync mode and 60 Hz display;
+it is not a peak-throughput measurement and is not a Mesa result. The host log
+is `/tmp/opencode/phone-vendor-vkmark-full.log` and is not part of the repo.
+
+## What works, what does not, and what remains unverified
+
+### Verified working
+
+- Vendor-HAL device enumeration and a clear/readback (`64 128 191 255`) via
+  `pvr-smoke`.
+- Vendor-HAL `vkcube` presentation on Termux:X11 display `:1`.
+- The full vendor-HAL `vkmark` default scene suite on the GE8322, with the
+  vsync-capped result above.
+- Mesa ICD enumeration, device creation, and dummy HWRT initialization only.
+
+### Known failures and blockers
+
+- Mesa RGXTQ func 3 queue-submit ioctl fails with `EINVAL`. Its exact DDK 1.18
+  32-bit-user/64-bit-kernel ABI, payload layout, pointer handling, and fence
+  semantics are not yet established.
+- Mesa swapchain setup on X11 fails at bridge ioctl ID 11 / func 2 with
+  `EINVAL`; Mesa `vkcube` aborts before any verified frame is presented.
+- No successful Mesa command submission, render, synchronization, or readback
+  has been demonstrated. Mesa is not currently a usable renderer on this phone.
+- No Mesa `vkmark` benchmark can be claimed until submission and WSI work.
+- Kali's desktop has not been validated as GPU-rendered. The visible cube and
+  benchmark use the separate vendor HAL, not Mesa.
+- OpenGL/Zink on this Mesa path has not been brought up or validated. Do not
+  infer OpenGL acceleration from Vulkan device enumeration or vendor results.
+- Mainline Mesa `pvr` expects the `drm/imagination` kernel UAPI; this phone
+  exposes proprietary `pvrsrvkm`. A compatible kernel DRM path or another
+  maintainable interface is still a major prerequisite for upstream Mesa.
+- GE8322 compiler/device-info and errata correctness, target-ABI usclib/NIR
+  generation, validation, Vulkan CTS/conformance, stability, and performance
+  remain incomplete or unverified.
+
+### Next steps
+
+1. Reconstruct and independently validate RGXTQ func 3 offline before making
+   further kernel submissions; do not guess at payloads on the phone.
+2. Fix and verify Mesa offscreen submit, clear, synchronization, and readback.
+3. Diagnose the Mesa swapchain ioctl only after rendering works; then retry
+   Mesa `vkcube` and a Mesa `vkmark` run.
+4. Validate Zink/OpenGL separately, checking the renderer string for the PowerVR
+   GPU rather than `llvmpipe`/`softpipe`.
+5. Only after those pass, test a lightweight desktop with compositing disabled
+   first. Keep the working vendor ICD as fallback and do not replace global
+   Vulkan/OpenGL libraries during bring-up.
+
+The vendor baseline is a useful working fallback, not evidence that the Mesa
+driver is fixed, upstreamed, conformant, or capable of rendering the Kali
+desktop. No Mesa Vulkan CTS result or full desktop acceleration result is
+available.
