@@ -4,18 +4,21 @@ Unofficial, experimental Mesa PowerVR (`pvr`) research for the PowerVR Rogue
 GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 (`SM-A032F`).
 
-> **Status:** research only for Mesa `pvr`. There is no working GE8322 Mesa
-> driver yet. The vendor kernel exposes a proprietary `pvrsrvkm` UAPI, while
-> Mesa `pvr` expects mainline `drm/imagination`. That kernel/firmware path is
-> the hard blocker.
+> **Status:** experimental, incomplete Mesa `pvr` bring-up. A local Mesa
+> adaptation can load the GE8322 ICD, enumerate the device, create a Vulkan
+> device, and create the dummy HWRT dataset through the vendor DDK 1.18
+> `pvrsrvkm` bridge. It is **not yet a working renderer**: the first Mesa
+> `vkQueueSubmit` fails with `EINVAL`, and `vkcube` crashes. Do not interpret
+> the driver's reported conformance version as a conformance-test result.
 >
-> A separate vendor-HAL Vulkan bridge lives in [bridge/](bridge/). It is
-> verified on the phone: `pvr-smoke` enumerates the PowerVR GE8322 through the
-> vendor HAL, and `vkcube` presents through Termux:X11.
+> The separate vendor-HAL Vulkan bridge in [bridge/](bridge/) is a distinct,
+> working path: its `pvr-smoke` succeeds and its `vkcube` presents through
+> Termux:X11. Do not confuse those results with Mesa ICD results.
 
 ## Start here
 
 - [GE8322.md](GE8322.md) — hardware details, current findings, blockers, roadmap
+- [TESTING.md](TESTING.md) — verified Mesa/vendor test results and next tests
 - [bridge/README.md](bridge/README.md) — vendor Vulkan HAL → libhybris →
   WSI layer → X11 bridge
 - [ge8322/vendor-features.md](ge8322/vendor-features.md) — decoded vendor DDK
