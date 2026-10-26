@@ -88,3 +88,18 @@ Do not retry a kernel call known to panic on error until its ABI and payload are
 verified offline. Keep proprietary blobs, firmware, kernel modules, and derived
 vendor code out of published artifacts. Do not describe this as working Mesa
 OpenGL or a first-of-its-kind result without sufficient evidence.
+
+## Latest phone retest
+
+On 2026-10-26, the checks were repeated over ADB on the phone. The vendor
+`pvr-smoke` passed and read back `64 128 191 255`. Mesa `vulkaninfo --summary`
+exited successfully (with an `XDG_RUNTIME_DIR` warning) and identified the
+GE8322. Mesa `pvr-smoke` again failed at RGXTQ func 3 with `EINVAL`, and Mesa
+`vkcube` exited with SIGSEGV after selecting Xlib.
+
+The Termux:X11 `X0` socket was bind-mounted into the chroot and was visible
+there, but `xdpyinfo` could not open display `:0`; the vendor `vkcube` control
+also segfaulted in that run. Therefore this retest does **not** validate the
+current X11 presentation setup. The earlier vendor-HAL Termux:X11 success
+remains a separate historical result. Check X server access/socket setup before
+using `vkcube` to judge Mesa WSI.
