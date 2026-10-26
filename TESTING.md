@@ -199,7 +199,7 @@ The phone reports a vendor OpenGL ES 3.2 driver for the GE8322. A separately
 staged libhybris EGL/GLES path in `/opt/pvr-bridge/opengl` can create a pbuffer
 inside the Kali chroot, render a clear, and read back `64 128 191 255`; the
 reported renderer is `PowerVR Rogue GE8322`. This is verified **vendor GLES**
-execution and is not Mesa/Zink or desktop-window acceleration.
+execution and is not Mesa/Zink or desktop OpenGL.
 
 The custom X11 probe opens `DISPLAY=:1`, initializes EGL, chooses a config, and
 creates/maps an X window, but crashes after entering `eglCreateWindowSurface`.
@@ -209,13 +209,19 @@ result. Its PC maps into stripped Kali `libX11.so.6.4.0 + 0x39886`; an earlier
 and is withdrawn. The exact function/caller remains unresolved.
 
 The `glmark2-es2-x11` package was downloaded and extracted only into private
-staging (not installed into Kali). Its vendor GLES path reports GE8322 and
-validates most scenes, but the validation process later segfaults. A timed
-`build` scene crashes with normal swap; `--frame-end none`, `finish`, or
-`readpixels` emits diagnostic scores but still crashes during shutdown. These
-are not valid benchmark scores or verified visible presentation. The regular
+staging (not installed into Kali). With the new `run-x11-gles` wrapper,
+`HYBRIS_X11_DISABLE_SHM=1`, and the vendor GLES path, glmark2 reports GE8322 and
+shows moving `build` and textured `texture` scenes visibly on Termux:X11. The
+live build loop reports roughly 154–163 FPS; the texture scene reported 168
+FPS. This confirms GLES drawing and X11 swaps with the XPutImage fallback.
+Without disabling SHM, the first timed scene crashes because the current shim
+does not check `shmat()` failure. A one-shot run still segfaults at shutdown;
+the long-running test was stopped after recording visible output. The regular
 GLX `glmark2 --validate` and default-EGL `glmark2-es2 --off-screen --validate`
-report Mesa `llvmpipe`, so those successful runs are software-rendered.
+report Mesa `llvmpipe`, so those runs remain software-rendered. The custom EGL
+smoke probe also still has its separate Xlib crash. Proprietary vendor
+libraries, the downloaded package, executables, and cores remain outside this
+repository.
 Proprietary vendor libraries, the downloaded package, executables, and cores
 remain outside this repository. See [opengl/README.md](opengl/README.md) for
 evidence and next steps.

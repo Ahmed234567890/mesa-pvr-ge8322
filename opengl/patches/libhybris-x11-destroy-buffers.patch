@@ -1,0 +1,17 @@
+diff --git a/hybris/egl/platforms/x11/x11_window.cpp b/hybris/egl/platforms/x11/x11_window.cpp
+index 687ccb4..da3bbe9 100644
+--- a/hybris/egl/platforms/x11/x11_window.cpp
++++ b/hybris/egl/platforms/x11/x11_window.cpp
+@@ -523,9 +523,8 @@ void X11NativeWindow::destroyBuffers()
+-    std::list<X11NativeWindowBuffer*>::iterator it = m_bufList.begin();
+-    for (; it!=m_bufList.end(); ++it)
++    while (!m_bufList.empty())
+     {
++        std::list<X11NativeWindowBuffer*>::iterator it = m_bufList.begin();
+         destroyBuffer(*it);
+-        it = m_bufList.erase(it);
++        m_bufList.erase(it);
+     }
+-    m_bufList.clear();
+     m_freeBufs = 0;
+ }

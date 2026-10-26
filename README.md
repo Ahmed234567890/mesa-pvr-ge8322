@@ -19,9 +19,9 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > accelerated Kali desktop/OpenGL support. Do not confuse them with Mesa ICD
 > results. Preliminary vendor GLES via libhybris can render/read back an
 > offscreen pbuffer. A custom X11 window probe segfaults. `glmark2-es2-x11`
-> validation identifies the GE8322 and passes most scenes, but timed
-> swap/presentation and shutdown still crash. Normal `glmark2` runs report
-> llvmpipe rather than hardware acceleration.
+> identifies the GE8322; with MIT-SHM disabled, moving and textured scenes are
+> visible on Termux:X11. One-shot shutdown still crashes. Normal GLX `glmark2`
+> runs report llvmpipe rather than hardware acceleration.
 
 ## Start here
 

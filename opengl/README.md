@@ -55,9 +55,11 @@ published here.
 | Kali chroot + libhybris EGL/GLES + null platform + pbuffer | **Pass**; renderer is GE8322; clear/readback is `64 128 191 255` | Vendor GPU GLES rendering works offscreen from a glibc armhf process |
 | Kali chroot + libhybris X11 EGL window smoke probe | **Fail**; segfault after entering `eglCreateWindowSurface` | The custom X11 native-window probe remains blocked |
 | `glmark2-es2-x11 --validate` + vendor GLES | Reports GE8322; most validation cases pass; process later segfaults | App-level EGL/GLES validation reaches the vendor GPU, but is not a clean exit or timed benchmark |
-| `glmark2-es2-x11 --benchmark build` + default swap | Reports GE8322, then segfaults at the first timed scene before FPS output | Normal frame presentation remains blocked |
-| Same timed `build` scene with `--frame-end none` | Emits FPS 1518 / score 1517, then segfaults during shutdown | Diagnostic rendering without presentation only; not a valid benchmark score |
-| Same timed `build` scene with `--frame-end finish` | Emits FPS 443 / score 442, then segfaults during shutdown | Diagnostic render/finish path; not a clean benchmark run |
+| `glmark2-es2-x11 --benchmark build` + default swap, SHM enabled | Crashes in the first timed scene | SysV SHM failure in the chroot leaves the XImage destination invalid |
+| Same timed `build` scene with `HYBRIS_X11_DISABLE_SHM=1` | **Visible moving scene on Termux:X11**; GE8322 renderer; repeated FPS 154–163 in `--run-forever` | X11 presentation works through XPutImage when MIT-SHM is disabled |
+| Timed `texture` scene through `run-x11-gles` | **Visible textured scene**; GE8322 renderer; FPS 168 | Confirms texture upload/shading and repeated swap, not just a clear |
+| Same timed scene, one-shot with SHM disabled | Emits FPS / score, then segfaults during process shutdown | Rendering and swap work; teardown still needs repair |
+| Same timed scene with `--frame-end none` / `finish` / `readpixels` | Emits scene results, then segfaults at shutdown | Useful diagnostics, not comparable benchmark scores |
 | Kali `glmark2 --validate` (GLX) | Most validation cases pass; reports Mesa `llvmpipe` | Software rendering only; not GE8322 acceleration |
 | Kali `glmark2-es2 --off-screen --validate` (default Mesa EGL) | Most validation cases pass; reports Mesa `llvmpipe` | Software GLES only; not GE8322 acceleration |
 | Mesa `pvr` OpenGL/Zink | Not tested | Mesa Vulkan submit and WSI failures remain; vendor GLES results do not imply Mesa support |
@@ -82,10 +84,11 @@ memory and is stored under `$HOME/pvr-reverse/cases/ge8322-opengl/evidence/`.
 
 The pbuffer run emitted non-fatal lookup warnings for `libui_compat_layer.so`
 and `/system/vendor/lib/egl/libGL_powervr.so`, but still completed with the
-PowerVR renderer and correct readback. The X11 window failure also reproduced
-with `HYBRIS_X11_DISABLE_SHM=1` and with `LC_ALL=C XMODIFIERS=@im=none`; neither
-disabling MIT-SHM nor changing locale/input-method environment variables
-avoided the crash.
+PowerVR renderer and correct readback. The custom X11 smoke probe still crashes
+with `HYBRIS_X11_DISABLE_SHM=1` and with `LC_ALL=C XMODIFIERS=@im=none`; however,
+the vendor GLES glmark2 app presents visible frames once MIT-SHM is disabled.
+The crash is therefore specific to the custom probe and/or its teardown, not
+proof that Termux:X11 is unavailable.
 
 Static import/export triage shows `libEGL_powervr.so` exports standard `egl*`
 entry points that delegate to `IMGegl*` symbols in `libIMGegl.so`. GLES modules
@@ -96,9 +99,11 @@ symbol survey is `evidence/vendor-symbol-survey.txt`.
 
 The installed Kali `glmark2` executable uses GLX (`libGL.so` / `glX*`) and
 reports llvmpipe. The `glmark2-es2-x11` executable was downloaded and extracted
-to private staging only (not installed into Kali). Its validation and timed
-tests use the vendor GLES driver, but swap/shutdown failures mean a successful
-visible GLES application is not yet established.
+to private staging only (not installed into Kali). With the X11 platform and
+`HYBRIS_X11_DISABLE_SHM=1`, it reports the GE8322 and renders a moving scene
+visibly on Termux:X11. A long-running process remains active and swaps frames;
+one-shot process shutdown still segfaults, so teardown and full-suite stability
+remain open.
 
 Dynamic-loading applications initially failed because the built
 `libhybris-common.so.1.0.0` requests an executable stack and glibc refuses to
@@ -112,6 +117,32 @@ workaround, not yet a general packaging fix. Reproduce the private copy with:
   "$LIBHYBRIS_BUILD/hybris/common/.libs/libhybris-common.so.1.0.0" \
   "$HOME/pvr-reverse/cases/ge8322-opengl/build/opengl-stage/lib/libhybris-common.so.1.0.0"
 ```
+
+## Run an X11 GLES application
+
+After staging the libhybris runtime and application under
+`/opt/pvr-bridge/opengl`, launch it inside the Kali chroot through the wrapper:
+
+```sh
+chroot /data/local/nhsystem/kali-armhf \
+  /opt/pvr-bridge/opengl/bin/run-x11-gles \
+  /opt/pvr-bridge/opengl/bin/glmark2-es2-bin \
+  --run-forever --benchmark build --data-path /usr/share/glmark2
+```
+
+The wrapper defaults to `DISPLAY=:1`, selects the libhybris X11 platform, sets
+the Android linker paths, and disables MIT-SHM. The latter is important in this
+chroot: the current libhybris code does not check a failed `shmat()` before
+copying to the returned address. Disabling SHM selects the `XPutImage` fallback.
+Set `DISPLAY` before invocation to target a different X server. This confirms a
+visible GLES path for this benchmark, not desktop OpenGL or Minecraft
+compatibility.
+
+The working libhybris build also carries
+`patches/libhybris-x11-destroy-buffers.patch`, which removes invalid list
+iterator use from native-window buffer cleanup. This improves correctness, but
+does **not** yet eliminate the observed one-shot shutdown crash; long-running
+applications remain the current test path.
 
 ## Build the diagnostic probes
 
@@ -189,27 +220,31 @@ evidence at `evidence/egl-gles2-x11-smoke.log`.
 
 ## Blockers and next work
 
-1. **X11 smoke-probe crash:** PC maps to stripped Xlib at `+0x39886`; the
-   caller chain is corrupt. GLmark2's canvas initializes and validates most
-   scenes, so compare its canvas/window creation with the custom probe. Add
-   stage logging around libhybris `X11NativeWindow` creation, buffer setup, swap,
-   and teardown.
-2. **Swap/benchmark crash:** default GLmark2 swap crashes at the first timed
-   scene. `--frame-end none`, `finish`, and `readpixels` emit a scene result but
-   still crash during shutdown. Capture a dedicated core at each stage and
-   isolate presentation from teardown before claiming visible acceleration.
-3. **Native-window compatibility:** compare Android's real `ANativeWindow`
+1. **SHM safety:** add a checked `shmat()` failure path in libhybris and fall
+   back to `XCreateImage`/`XPutImage` automatically, rather than requiring
+   `HYBRIS_X11_DISABLE_SHM=1`.
+2. **Shutdown crash:** visible frames and repeated swaps work in `--run-forever`
+   with SHM disabled, but a one-shot glmark2 run segfaults during shutdown.
+   Symbolize the latest core and isolate EGL surface destruction, native-window
+   refcounts, and gralloc buffer release.
+3. **Custom smoke-probe crash:** PC maps to stripped Xlib at `+0x39886`; the
+   caller chain is corrupt. Compare its X window/config construction with
+   glmark2's working canvas and fix the probe or shim accordingly.
+4. **Native-window compatibility:** compare Android's real `ANativeWindow`
    contract and gralloc/mapper behavior with libhybris's X11 shim. Test a
    safer bridge (for example, rendering to an Android-compatible buffer and
    presenting it through X11 DRI3) if direct window surfaces are not viable.
-4. **GLES benchmark:** once swap and shutdown are clean, run the full timed
-   GLES2 suite and verify `GL_RENDERER` plus visible output. Current no-swap
-   numbers are diagnostic only. Do not use GLX `glmark2` as evidence for this
-   vendor GLES path.
-5. **Desktop:** test a small X11 application, then a lightweight desktop with
+5. **GLES benchmark:** once shutdown is clean, run the full timed GLES2 suite
+   and verify `GL_RENDERER` plus visible output. Do not use GLX `glmark2` as
+   evidence for this vendor GLES path.
+6. **Desktop / Minecraft:** identify whether the target launcher needs desktop
+   GL, GLX, or can run through GLES. Vendor GLES 3.2 is not automatically
+   desktop OpenGL; test its actual renderer path separately before claiming
+   Minecraft compatibility.
+7. **Desktop:** test a lightweight desktop with
    compositing disabled. Verify renderer strings per process; avoid claiming
    acceleration if apps fall back to `llvmpipe`/`softpipe`.
-6. **Mesa OpenGL:** keep this separate. Mesa `pvr` is Vulkan-focused and its
+8. **Mesa OpenGL:** keep this separate. Mesa `pvr` is Vulkan-focused and its
    queue submit/swapchain paths still fail. Do not replace Kali's default GL or
    Vulkan drivers; retain the vendor paths as fallback.
 
@@ -234,6 +269,13 @@ libhybris build log. Relevant files include:
 - `evidence/glmark2-es2-vendor-build-frame-none.log`
 - `evidence/glmark2-es2-vendor-build-frame-finish.log`
 - `evidence/glmark2-es2-vendor-build-frame-readpixels.log`
+- `evidence/glmark2-es2-vendor-build-no-shm.log`
+- `evidence/glmark2-es2-vendor-build-fixed.log`
+- `evidence/glmark2-vendor-wrapper-live.log`
+- `evidence/glmark2-vendor-texture-live.log`
+- `evidence/glmark2-vendor-live-screen.png` (visible rendered scene)
+- `evidence/glmark2-vendor-wrapper-screen.png`
+- `evidence/glmark2-vendor-texture-screen.png`
 - `evidence/egl-loader-smoke.log` (dynamic-loader failure and isolated workaround)
 - `evidence/x11-smoke.core` (private process-memory dump)
 - `evidence/libhybris-egl-build.log`
