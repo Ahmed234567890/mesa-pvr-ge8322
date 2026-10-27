@@ -288,11 +288,16 @@ build and usage.
 On 2026-10-26, the existing Kali XFCE session was started on Termux:X11 display
 `:1` without installing/removing Kali packages. The XFCE panel configuration
 had an unavailable `null` plugin; removing that invalid panel entry allowed
-the desktop to appear. Prism Launcher 11.1.1 was open on the XFCE desktop; on
-2026-10-27 only that launcher was removed so a different Prism version can be
-installed, while its private `user-data`, staged runtime and chroot were kept.
-Its title bar was initially obscured by the top panel; moving the window below
-the panel restored normal dragging.
+the desktop to appear. On 2026-10-27 the session was reproduced: the chroot
+inherits Android's SELinux policy, which has no D-Bus rules, so the session bus
+denied every call until `desktop/selinux-off.c` was preloaded to make
+libselinux report "disabled" for the session. The panel, desktop icons, window
+manager, and Thunar then started; applets that need Android's system bus still
+fail. Prism Launcher 11.1.1 was open on the XFCE desktop; on 2026-10-27 only
+that launcher was removed so a different Prism version can be installed, while
+its private `user-data`, staged runtime and chroot were kept. Its title bar was
+initially obscured by the top panel; moving the window below the panel restored
+normal dragging.
 
 The Prism `1.12.2` instance reached the **Play Demo** flow with a demo player
 name. Launch was tested using the staged ARMHF Java 21 runtime, Prism's Java

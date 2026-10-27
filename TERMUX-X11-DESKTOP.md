@@ -10,7 +10,10 @@ that XFCE or Minecraft is GPU-accelerated.
 - Termux:X11 display `:1` is running on the phone.
 - Kali's already-installed XFCE session, window manager, panel, and desktop are
   running on that display. No Kali packages were installed or removed for this
-  session.
+  session. The session bus needs `desktop/selinux-off.c` preloaded (see below)
+  because the chroot inherits Android's SELinux policy, which has no D-Bus
+  rules. The desktop is drawn through X11, not through the vendor GLES path, so
+  its appearance is not evidence of GPU acceleration.
 - Prism Launcher 11.1.1 was removed on 2026-10-27 so a different Prism version
   can be installed. Only the launcher was deleted: its private `user-data`
   (instances, accounts, game data), the staged Java/Qt/GL4ES runtime and the
@@ -38,6 +41,21 @@ Kali chroot with a chroot-local temporary directory. `TMPDIR=/tmp` matters:
 without it, XFCE may try to create ICE session files under Android's
 `/data/local/tmp` and fail to complete session startup.
 
+The chroot inherits Android's SELinux policy. That policy has no D-Bus rules,
+so `dbus-daemon` starts but denies every method call with "An SELinux policy
+prevents this sender..." and XFCE shows *Unable to contact settings server*.
+Build the small preload helper from `desktop/selinux-off.c`, stage it under
+`/opt/pvr-bridge/desktop/lib/`, and preload it for the session. It only makes
+libselinux report "disabled" to the processes that preload it; it does not
+change the Android policy or the chroot.
+
+```sh
+arm-none-linux-gnueabihf-gcc --sysroot=$SYSROOT -O2 -Wall -Wextra \
+  -fPIC -shared -o libselinux-off.so desktop/selinux-off.c
+```
+
+Then start the session:
+
 ```sh
 am start -n com.termux.x11/.MainActivity
 CH=/data/local/nhsystem/kali-armhf
@@ -47,8 +65,9 @@ su -c "mkdir -p \$CH/tmp/xfce-runtime; \
   chroot \$CH /usr/bin/env DISPLAY=:1 HOME=/root TMPDIR=/tmp \
     XDG_CONFIG_HOME=/root/.config XDG_DATA_HOME=/root/.local/share \
     XDG_RUNTIME_DIR=/tmp/xfce-runtime PATH=/usr/bin:/bin \
+    LD_PRELOAD=/opt/pvr-bridge/desktop/lib/libselinux-off.so \
     /usr/bin/dbus-run-session -- /usr/bin/startxfce4 \
-    >/tmp/xfce-x11.log 2>&1 &"
+    >/data/local/tmp/xfce-x11.log 2>&1 &"
 ```
 
 The command assumes the Termux:X11 server and the Kali chroot are already
@@ -57,9 +76,18 @@ available. If `startxfce4` reports that an X server is already running on
 
 The phone's saved XFCE panel configuration contained an unavailable `null`
 plugin. XFCE asked whether to remove it; removing that invalid panel entry let
-the panel and desktop appear. XFCE also reports that the system bus/systemd and
-some Android hardware applets are unavailable in this chroot. These warnings
-did not prevent the desktop from appearing.
+the panel and desktop appear. XFCE still reports that the system bus
+(`/run/dbus/system_bus_socket`), systemd, and some Android hardware applets are
+unavailable in this chroot; applets that need the system bus (Blueman, some
+NetworkManager/GVFS monitors) fail to start. These warnings did not prevent the
+panel, desktop icons, window manager, and Thunar from appearing.
+
+To stop the session without killing the shell, use exact process names rather
+than `pkill -f`, which also matches the command line of the shell running it:
+
+```sh
+pkill -x xfce4-session
+```
 
 ## Moving Prism when its title bar is obscured
 

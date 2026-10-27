@@ -66,7 +66,7 @@ published here.
 | Kali `glmark2 --validate` (GLX) | Most validation cases pass; reports Mesa `llvmpipe` | Software rendering only; not GE8322 acceleration |
 | Kali `glmark2-es2 --off-screen --validate` (default Mesa EGL) | Most validation cases pass; reports Mesa `llvmpipe` | Software GLES only; not GE8322 acceleration |
 | Mesa `pvr` OpenGL/Zink | Not tested | Mesa Vulkan submit and WSI failures remain; vendor GLES results do not imply Mesa support |
-| Kali desktop acceleration | Not tested / not working evidence | No desktop or compositor has been verified using this GLES path |
+| Kali desktop acceleration | Not tested / not working evidence | XFCE runs on Termux:X11, but draws through X11/CPU; no compositor or desktop app has been verified on the vendor GLES path |
 
 The X11 probe crash had two independent causes, both now fixed.
 
