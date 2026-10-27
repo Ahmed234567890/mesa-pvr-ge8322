@@ -10,10 +10,11 @@ that XFCE or Minecraft is GPU-accelerated.
 - Termux:X11 display `:1` is running on the phone.
 - Kali's already-installed XFCE session, window manager, panel, and desktop are
   running on that display. No Kali packages were installed or removed for this
-  session. The session bus needs `desktop/selinux-off.c` preloaded (see below)
-  because the chroot inherits Android's SELinux policy, which has no D-Bus
-  rules. The desktop is drawn through X11, not through the vendor GLES path, so
-  its appearance is not evidence of GPU acceleration.
+  session. The session bus needs `desktop/selinux-off.c` preloaded for
+  `dbus-daemon` only; `desktop/start-xfce.sh` does that and also keeps Android's
+  `SHELL=/system/bin/sh` and `LD_PRELOAD` out of the session (see below). The
+  desktop is drawn through X11, not through the vendor GLES path, so its
+  appearance is not evidence of GPU acceleration.
 - Prism Launcher 11.1.1 was removed on 2026-10-27 so a different Prism version
   can be installed. Only the launcher was deleted: its private `user-data`
   (instances, accounts, game data), the staged Java/Qt/GL4ES runtime and the
@@ -44,14 +45,34 @@ without it, XFCE may try to create ICE session files under Android's
 The chroot inherits Android's SELinux policy. That policy has no D-Bus rules,
 so `dbus-daemon` starts but denies every method call with "An SELinux policy
 prevents this sender..." and XFCE shows *Unable to contact settings server*.
-Build the small preload helper from `desktop/selinux-off.c`, stage it under
-`/opt/pvr-bridge/desktop/lib/`, and preload it for the session. It only makes
-libselinux report "disabled" to the processes that preload it; it does not
-change the Android policy or the chroot.
+`desktop/selinux-off.c` makes libselinux report "disabled" for the session bus.
+
+Two Android variables must not leak into the session:
+
+- `SHELL=/system/bin/sh` is exported by the `su -c` shell. If it reaches XFCE,
+  every terminal tries to start Android's `/system/bin/sh` instead of a Kali
+  shell.
+- `LD_PRELOAD` with the SELinux shim must be set for `dbus-daemon` only. The
+  shim is a glibc library; if it is exported to the session, any Android binary
+  started from the desktop dies in Android's linker with
+  `library "libc.so.6" not found: needed by .../libselinux-off.so`. That is what
+  made terminals close immediately: QTerminal ran `/system/bin/sh` and the
+  preload made the shell fail to link.
+
+Build and stage the helper, then use `desktop/start-xfce.sh`, which starts a
+bus with the shim scoped to `dbus-daemon`, sets `SHELL=/bin/bash`, and clears
+`LD_PRELOAD` before `exec startxfce4`:
 
 ```sh
 arm-none-linux-gnueabihf-gcc --sysroot=$SYSROOT -O2 -Wall -Wextra \
   -fPIC -shared -o libselinux-off.so desktop/selinux-off.c
+
+CH=/data/local/nhsystem/kali-armhf
+su -c "mkdir -p \$CH/opt/pvr-bridge/desktop/lib \$CH/opt/pvr-bridge/desktop/bin
+  cp libselinux-off.so \$CH/opt/pvr-bridge/desktop/lib/
+  cp desktop/start-xfce.sh \$CH/opt/pvr-bridge/desktop/bin/start-xfce
+  chmod 755 \$CH/opt/pvr-bridge/desktop/bin/start-xfce
+  chmod 644 \$CH/opt/pvr-bridge/desktop/lib/libselinux-off.so"
 ```
 
 Then start the session:
@@ -59,15 +80,9 @@ Then start the session:
 ```sh
 am start -n com.termux.x11/.MainActivity
 CH=/data/local/nhsystem/kali-armhf
-export CH
-su -c "mkdir -p \$CH/tmp/xfce-runtime; \
-  chmod 700 \$CH/tmp/xfce-runtime; \
-  chroot \$CH /usr/bin/env DISPLAY=:1 HOME=/root TMPDIR=/tmp \
-    XDG_CONFIG_HOME=/root/.config XDG_DATA_HOME=/root/.local/share \
-    XDG_RUNTIME_DIR=/tmp/xfce-runtime PATH=/usr/bin:/bin \
-    LD_PRELOAD=/opt/pvr-bridge/desktop/lib/libselinux-off.so \
-    /usr/bin/dbus-run-session -- /usr/bin/startxfce4 \
-    >/data/local/tmp/xfce-x11.log 2>&1 &"
+su -c "chroot \$CH /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin DISPLAY=:1 \
+  TMPDIR=/tmp /opt/pvr-bridge/desktop/bin/start-xfce \
+  >/data/local/tmp/xfce-x11.log 2>&1 &"
 ```
 
 The command assumes the Termux:X11 server and the Kali chroot are already

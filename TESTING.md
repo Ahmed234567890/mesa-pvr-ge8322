@@ -293,7 +293,15 @@ inherits Android's SELinux policy, which has no D-Bus rules, so the session bus
 denied every call until `desktop/selinux-off.c` was preloaded to make
 libselinux report "disabled" for the session. The panel, desktop icons, window
 manager, and Thunar then started; applets that need Android's system bus still
-fail. Prism Launcher 11.1.1 was open on the XFCE desktop; on 2026-10-27 only
+fail.
+
+Terminals launched from the desktop closed immediately at first. The `su -c`
+shell exported `SHELL=/system/bin/sh` and the glibc SELinux preload into the
+session, so QTerminal started Android's shell and Android's linker rejected the
+glibc shim (`library "libc.so.6" not found`). `desktop/start-xfce.sh` now sets
+`SHELL=/bin/bash`, scopes the preload to `dbus-daemon`, and clears
+`LD_PRELOAD` before starting XFCE; QTerminal then opens with a normal Kali bash
+prompt. Prism Launcher 11.1.1 was open on the XFCE desktop; on 2026-10-27 only
 that launcher was removed so a different Prism version can be installed, while
 its private `user-data`, staged runtime and chroot were kept. Its title bar was
 initially obscured by the top panel; moving the window below the panel restored
