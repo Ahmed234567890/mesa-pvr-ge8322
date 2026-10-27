@@ -28,6 +28,26 @@ and conformance version `1.4.3.3`. The latter is a driver-reported property,
 not a CTS result. `vkCreateDevice` and HWRT initialization demonstrate
 initialization only; they do not establish GPU rendering or OpenGL support.
 
+## Verification matrix
+
+`scripts/verify-all.sh` runs the whole device matrix and is the gate for every
+change: it pushes `scripts/verify-all-device.sh` to the phone, runs it as root,
+and pulls the device-side log with retries, so a Wi-Fi ADB drop under load does
+not lose the results.
+
+```sh
+ADB_SERIAL=192.168.1.16:46767 scripts/verify-all.sh
+FULL=1 ADB_SERIAL=192.168.1.16:46767 scripts/verify-all.sh   # adds glmark2
+```
+
+The matrix covers: chroot and Android bind mounts, the X server and a client
+handshake, the vendor GLES pbuffer and X11 probes, the desktop OpenGL baseline
+renderer, the vendor Vulkan ICD (`vulkaninfo`, compute submit, presentation),
+an H.264 hardware encode plus an `ffmpeg` decode check, and the XFCE session.
+Checks that are tracked as known limitations report `XFAIL` and do not fail the
+run. Logs are written under `/tmp/opencode/`, never into the repository.
+
+
 ## Evidence and reproduction
 
 The original device logs are local research artifacts and are not included in
