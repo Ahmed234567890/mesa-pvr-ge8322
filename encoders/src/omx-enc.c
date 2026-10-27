@@ -1,5 +1,5 @@
 /*
- * omx-enc - encode raw YUV video with the Unisoc/SPRD hardware encoder.
+ * omx-enc - encode raw YUV video with the Unisoc/SPRD OpenMAX encoders.
  *
  * The vendor OpenMAX IL component only works through libhybris, and only
  * after two workarounds for Android 14 incompatibilities:
@@ -10,11 +10,15 @@
  *   2. The vendor looper path corrupts the handler's mutex, so AMessage::post
  *      is redirected to a shim that calls onMessageReceived() synchronously.
  *
- * Input is tightly packed NV12 (default) or I420.  Output is a raw H.264 or
- * HEVC elementary stream, suitable for piping into ffmpeg.
+ * h264 and h265 run on the video sub-processor.  mpeg4 and h263 use the
+ * vendor's software components.  There is no VP8 encoder component.
+ *
+ * Input is tightly packed NV12 (default) or I420.  Output is a raw
+ * elementary stream (H.264, HEVC, MPEG-4 or H.263), suitable for piping into
+ * ffmpeg.
  *
  * Usage:
- *   omx-enc -c h264|h265 [-w W] [-h H] [-r FPS] [-b BPS]
+ *   omx-enc -c h264|h265|mpeg4|h263 [-w W] [-h H] [-r FPS] [-b BPS]
  *           [-p nv12|i420] [-i IN|-] [-o OUT|-] [-n FRAMES] [-q]
  *
  * Examples:
@@ -106,6 +110,41 @@ static OMX_BUFFERHEADERTYPE *g_outq[OUTQ_LEN];
 static int g_outq_head, g_outq_tail, g_outq_count;
 
 #define MAX_BUF 8
+
+/*
+ * The components the SPRD core actually registers.  h264/h265 run on the
+ * video sub-processor (/dev/sprd_vsp); mpeg4/h263 are the vendor's software
+ * encoders.  There is no OMX VP8 encoder on this device: the core lists
+ * OMX.sprd.vpx.decoder only, and libomx_vpxenc_hw_sprd.so exports no OMX
+ * symbols at all, so it cannot be driven through OpenMAX IL.
+ */
+typedef struct {
+    const char *name;
+    const char *component;
+    const char *lib;
+    OMX_VIDEO_CODINGTYPE coding;
+    int hardware;
+} codec_def;
+
+static const codec_def g_codecs[] = {
+    { "h264",  "OMX.sprd.h264.encoder",  "libomx_avcenc_hw_sprd.so",
+      OMX_VIDEO_CodingAVC,   1 },
+    { "h265",  "OMX.sprd.h265.encoder",  "libomx_hevcenc_hw_sprd.so",
+      OMX_VIDEO_CodingHEVC,  1 },
+    { "mpeg4", "OMX.sprd.mpeg4.encoder", "libomx_m4vh263enc_sw_sprd.so",
+      OMX_VIDEO_CodingMPEG4, 0 },
+    { "h263",  "OMX.sprd.h263.encoder",  "libomx_m4vh263enc_sw_sprd.so",
+      OMX_VIDEO_CodingH263,  0 },
+};
+
+static const codec_def *find_codec(const char *name)
+{
+    size_t i;
+    for (i = 0; i < sizeof(g_codecs) / sizeof(g_codecs[0]); i++)
+        if (!strcmp(g_codecs[i].name, name))
+            return &g_codecs[i];
+    return NULL;
+}
 
 static const char *err_name(OMX_ERRORTYPE e)
 {
@@ -352,8 +391,8 @@ static void copy_frame(uint8_t *dst, int stride, int slice, int w, int h,
 static void usage(const char *prog)
 {
     fprintf(stderr,
-        "Usage: %s -c h264|h265 [options]\n"
-        "  -c CODEC   h264 or h265 (required)\n"
+        "Usage: %s -c h264|h265|mpeg4|h263 [options]\n"
+        "  -c CODEC   h264/h265 (hardware VSP) or mpeg4/h263 (software)\n"
         "  -w WIDTH   frame width  (default 1280)\n"
         "  -h HEIGHT  frame height (default 720)\n"
         "  -r FPS     frame rate   (default 30)\n"
@@ -369,6 +408,7 @@ static void usage(const char *prog)
 
 int main(int argc, char **argv)
 {
+    const codec_def *cd = NULL;
     const char *codec = NULL;
     const char *in_path = "-";
     const char *out_path = "-";
@@ -398,7 +438,12 @@ int main(int argc, char **argv)
         default: usage(argv[0]); return 2;
         }
     }
-    if (!codec || (strcmp(codec, "h264") && strcmp(codec, "h265"))) {
+    if (codec && !strcmp(codec, "vp8")) {
+        fprintf(stderr, "omx-enc: VP8 encoding is not available: the vendor core\n"
+                        "  registers no VP8 encoder component.\n");
+        return 2;
+    }
+    if (!codec || !(cd = find_codec(codec))) {
         usage(argv[0]);
         return 2;
     }
@@ -489,13 +534,9 @@ int main(int argc, char **argv)
         h_open("libstagefrighthw.so", RTLD_NOW | 0x1000);
         if (patch_handler_alloc() != 0)
             fprintf(stderr, "omx-enc: warning: handler allocation patch failed\n");
-        if (!strcmp(codec, "h264"))
-            h_open("libomx_avcenc_hw_sprd.so", RTLD_NOW | 0x1000);
-        else
-            h_open("libomx_hevcenc_hw_sprd.so", RTLD_NOW | 0x1000);
+        h_open(cd->lib, RTLD_NOW | 0x1000);
 
-        const char *comp_name = !strcmp(codec, "h264")
-            ? "OMX.sprd.h264.encoder" : "OMX.sprd.h265.encoder";
+        const char *comp_name = cd->component;
         OMX_HANDLETYPE comp = NULL;
         OMX_ERRORTYPE rc = OMX_GetHandle(&comp, (OMX_STRING)comp_name,
                                          NULL, &g_cbs);
@@ -580,8 +621,7 @@ int main(int argc, char **argv)
 
         INIT_STRUCT(fmt);
         fmt.nPortIndex = 1;
-        fmt.eCompressionFormat = !strcmp(codec, "h264")
-            ? OMX_VIDEO_CodingAVC : OMX_VIDEO_CodingHEVC;
+        fmt.eCompressionFormat = cd->coding;
         fmt.eColorFormat = OMX_COLOR_FormatUnused;
         check("SetParameter(output format)",
               p_SetParameter(comp, OMX_IndexParamVideoPortFormat, &fmt));
@@ -594,7 +634,7 @@ int main(int argc, char **argv)
         check("SetParameter(bitrate)",
               p_SetParameter(comp, OMX_IndexParamVideoBitrate, &br));
 
-        if (!strcmp(codec, "h264")) {
+        if (cd->coding == OMX_VIDEO_CodingAVC) {
             OMX_VIDEO_PARAM_AVCTYPE avc;
             INIT_STRUCT(avc);
             avc.nPortIndex = 1;
@@ -612,6 +652,34 @@ int main(int argc, char **argv)
             avc.nBFrames = 0;
             check("SetParameter(AVC params)",
                   p_SetParameter(comp, OMX_IndexParamVideoAvc, &avc));
+        } else if (cd->coding == OMX_VIDEO_CodingMPEG4) {
+            OMX_VIDEO_PARAM_MPEG4TYPE m4;
+            INIT_STRUCT(m4);
+            m4.nPortIndex = 1;
+            m4.eProfile = OMX_VIDEO_MPEG4ProfileSimple;
+            m4.eLevel = OMX_VIDEO_MPEG4Level5;
+            m4.nPFrames = (OMX_U32)(fps > 1 ? fps - 1 : 1);
+            m4.nBFrames = 0;
+            m4.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI |
+                                      OMX_VIDEO_PictureTypeP;
+            m4.bSVH = OMX_FALSE;
+            m4.bGov = OMX_FALSE;
+            check("SetParameter(MPEG-4 params)",
+                  p_SetParameter(comp, OMX_IndexParamVideoMpeg4, &m4));
+        } else if (cd->coding == OMX_VIDEO_CodingH263) {
+            OMX_VIDEO_PARAM_H263TYPE h263;
+            INIT_STRUCT(h263);
+            h263.nPortIndex = 1;
+            h263.eProfile = OMX_VIDEO_H263ProfileBaseline;
+            h263.eLevel = OMX_VIDEO_H263Level45;
+            h263.nPFrames = (OMX_U32)(fps > 1 ? fps - 1 : 1);
+            h263.nBFrames = 0;
+            h263.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI |
+                                        OMX_VIDEO_PictureTypeP;
+            h263.bPLUSPTYPEAllowed = OMX_FALSE;
+            h263.nGOBHeaderInterval = 0;
+            check("SetParameter(H.263 params)",
+                  p_SetParameter(comp, OMX_IndexParamVideoH263, &h263));
         }
 
         /* ---- final geometry ---- */
@@ -640,9 +708,10 @@ int main(int argc, char **argv)
 
         if (!g_quiet)
             fprintf(stderr,
-                    "omx-enc: %s %dx%d @%dfps %ldbps, stride=%d slice=%d, "
+                    "omx-enc: %s (%s) %dx%d @%dfps %ldbps, stride=%d slice=%d, "
                     "%u in / %u out buffers\n",
-                    codec, width, height, fps, bitrate,
+                    codec, cd->hardware ? "hardware VSP" : "software",
+                    width, height, fps, bitrate,
                     in_stride, in_slice, in_count, out_count);
 
         OMX_BUFFERHEADERTYPE *in_buf[MAX_BUF], *out_buf[MAX_BUF];

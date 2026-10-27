@@ -8,20 +8,32 @@ sub-processor instead of the CPU.
 > **Status:** verified on the phone (SM-A032F, Android 14, armhf Kali).
 > `OMX.sprd.h264.encoder` and `OMX.sprd.h265.encoder` produce elementary
 > streams that `ffmpeg` decodes cleanly at 320x240, 640x480 and 1280x720,
-> from NV12 or I420 input, in file and pipe modes. Decoding through OpenMAX,
-> VP8/MPEG-4/H.263 encoding, and rate-control tuning are **not** verified.
+> from NV12 or I420 input, in file and pipe modes. The software
+> `OMX.sprd.mpeg4.encoder` and `OMX.sprd.h263.encoder` also work at 640x480.
+> Decoding through OpenMAX, VP8 encoding, and rate-control tuning are **not**
+> verified.
 
 ## What the vendor exposes
 
-`libsprd_omx_core.so` enumerates these encoders:
+`libsprd_omx_core.so` registers these encoders:
 
-| Component | Library | Device |
+| Component | Library | Runs on |
 | --- | --- | --- |
 | `OMX.sprd.h264.encoder` | `libomx_avcenc_hw_sprd.so` | `/dev/sprd_vsp` |
 | `OMX.sprd.h265.encoder` | `libomx_hevcenc_hw_sprd.so` | `/dev/sprd_vsp` |
-| `OMX.sprd.vpx.encoder` | `libomx_vpxenc_hw_sprd.so` | `/dev/sprd_vsp` |
-| `OMX.sprd.mpeg4.encoder` | `libomx_m4vh263enc_sw_sprd.so` | software |
-| `OMX.sprd.h263.encoder` | `libomx_m4vh263enc_sw_sprd.so` | software |
+| `OMX.sprd.mpeg4.encoder` | `libomx_m4vh263enc_sw_sprd.so` | CPU |
+| `OMX.sprd.h263.encoder` | `libomx_m4vh263enc_sw_sprd.so` | CPU |
+
+There is **no VP8 encoder component**. The core registers
+`OMX.sprd.vpx.decoder` only, and while `/vendor/lib/libomx_vpxenc_hw_sprd.so`
+exists, it is a bare VSP library: it exports no `OMX_ComponentInit` and no
+OpenMAX symbols at all, so it cannot be driven through OpenMAX IL.
+`omx-enc -c vp8` therefore fails with an explicit message instead of guessing.
+
+The MPEG-4/H.263 pair is the vendor's software path. The core first probes for
+a hardware variant (`libomx_m4vh263enc_hw_sprd.so`), which does not exist on
+this build, prints `library "libomx_m4vh263enc_hw_sprd.so" not found`, then
+falls back to the software library. That warning is expected and harmless.
 
 The H.264/HEVC components allocate through `/dev/ion` and run on the VSP.
 There is no `/dev/video*` node and no VA-API/V4L2-M2M stack, so FFmpeg's
@@ -44,7 +56,8 @@ libhybris (Android 14 q linker)
   +-- libsprd_omx_core.so
         +-- libstagefrighthw.so   SprdSimpleOMXComponent
               +-- libomx_avcenc_hw_sprd.so / libomx_hevcenc_hw_sprd.so
-                    +-- /dev/sprd_vsp, /dev/ion
+              |     +-- /dev/sprd_vsp, /dev/ion
+              +-- libomx_m4vh263enc_sw_sprd.so   (MPEG-4 / H.263, CPU)
 ```
 
 ## Why the shim and the two patches
@@ -135,13 +148,13 @@ called directly from a Kali shell once the Android bind mounts are present.
 ## Usage
 
 ```text
-omx-enc -c h264|h265 [-w W] [-h H] [-r FPS] [-b BPS]
+omx-enc -c h264|h265|mpeg4|h263 [-w W] [-h H] [-r FPS] [-b BPS]
         [-p nv12|i420] [-i IN|-] [-o OUT|-] [-n FRAMES] [-q] [-v]
 ```
 
 | Option | Meaning |
 | --- | --- |
-| `-c` | `h264` or `h265` (required) |
+| `-c` | `h264`, `h265` (hardware VSP) or `mpeg4`, `h263` (software); required |
 | `-w`, `-h` | frame size, must be even (default 1280x720) |
 | `-r` | frame rate (default 30) |
 | `-b` | target bitrate in bits/s (default 4000000) |
@@ -149,6 +162,8 @@ omx-enc -c h264|h265 [-w W] [-h H] [-r FPS] [-b BPS]
 | `-i`, `-o` | input/output path, `-` for stdin/stdout |
 | `-n` | stop after N frames (default: until EOF) |
 | `-q`, `-v` | quiet / per-frame logging |
+
+`-c vp8` is rejected: this device has no VP8 encoder component.
 
 Input is tightly packed (no stride padding). The tool copies each frame into
 the encoder's reported stride and slice height.
@@ -194,11 +209,26 @@ chroot, then the stream was pulled to a desktop and checked with FFmpeg.
 | H.264 | 640x480 | I420 | 25 | decodes, 25 frames |
 | H.264 | 1280x720 | NV12 | 30 | decodes, 30 frames, ~470 KB |
 | HEVC | 320x240 | NV12 | 30 | decodes, 30 frames |
+| HEVC | 640x480 | I420 | 25 | decodes, 25 frames |
 | HEVC | 1280x720 | NV12 | 30 | decodes, 30 frames, ~468 KB |
+| MPEG-4 | 640x480 | I420 | 25 | decodes, 25 frames (software) |
+| H.263 | 640x480 | I420 | 25 | decodes, 25 frames (software) |
 
 The H.264 output is Constrained Baseline (no B-frames) and the HEVC output is
 Main profile, both from the component's defaults plus the explicit settings in
 `omx-enc`.
+
+The MPEG-4 and H.263 streams are raw elementary streams. FFmpeg needs the
+container hinted:
+
+```sh
+ffmpeg -f m4v  -i out.m4v  -f null -   # MPEG-4 part 2
+ffmpeg -f h263 -i out.h263 -f null -   # H.263
+```
+
+Without `-f m4v` FFmpeg may still probe MPEG-4 correctly, but the raw stream
+carries no timestamps, so decoding to the null muxer can print a
+"non monotonically increasing dts" warning. The frame count is still correct.
 
 ## Persisting the bind mounts
 

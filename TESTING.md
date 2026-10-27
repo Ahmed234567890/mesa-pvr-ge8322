@@ -154,7 +154,9 @@ is `/tmp/opencode/phone-vendor-vkmark-full.log` and is not part of the repo.
   vsync-capped result above.
 - The SPRD hardware H.264 and HEVC encoders through libhybris: 320x240,
   640x480 and 1280x720 streams produced from NV12/I420 input decode cleanly in
-  `ffmpeg`, in file and pipe modes. See [encoders/README.md](encoders/README.md).
+  `ffmpeg`, in file and pipe modes. The vendor software MPEG-4 and H.263
+  encoders also produce decodable 640x480 streams. There is no VP8 encoder
+  component on this build. See [encoders/README.md](encoders/README.md).
 - Mesa ICD enumeration, device creation, and dummy HWRT initialization only.
 
 ### Known failures and blockers
@@ -248,18 +250,24 @@ Verified streams, pulled to a desktop and decoded with `ffmpeg`:
 | H.264 | 640x480 | I420 | 25 | decodes |
 | H.264 | 1280x720 | NV12 | 30 | decodes, ~470 KB |
 | HEVC | 320x240 | NV12 | 30 | decodes |
+| HEVC | 640x480 | I420 | 25 | decodes |
 | HEVC | 1280x720 | NV12 | 30 | decodes, ~468 KB |
+| MPEG-4 | 640x480 | I420 | 25 | decodes (software component) |
+| H.263 | 640x480 | I420 | 25 | decodes (software component) |
 
 The output is Constrained Baseline H.264 (no B-frames) and Main-profile HEVC.
 The tool is `omx-enc` in `/opt/pvr-bridge/encoders/bin`, wrapped by
 `omx-enc-env`, and accepts raw NV12/I420 on stdin or a file and writes an
 elementary stream to stdout or a file, so it can be piped from/to `ffmpeg`.
-Decoding through OpenMAX, VP8/MPEG-4/H.263 encoding, rate-control tuning, and
-long-lived use in a single process are not verified. `OMX_FreeHandle`/
-`OMX_Deinit` are deliberately skipped because unloading the vendor codec
-aborts in libhybris's TLS-module teardown; the one-shot CLI exits instead.
-See [encoders/README.md](encoders/README.md) for the stack, patches, build and
-usage.
+`-c mpeg4` and `-c h263` drive the vendor's software components, not the VSP.
+There is no VP8 encoder component on this build: the core registers only
+`OMX.sprd.vpx.decoder`, and `libomx_vpxenc_hw_sprd.so` exports no OpenMAX
+symbols, so `-c vp8` is rejected. Decoding through OpenMAX, rate-control
+tuning, and long-lived use in a single process are not verified.
+`OMX_FreeHandle`/`OMX_Deinit` are deliberately skipped because unloading the
+vendor codec aborts in libhybris's TLS-module teardown; the one-shot CLI exits
+instead. See [encoders/README.md](encoders/README.md) for the stack, patches,
+build and usage.
 
 ## XFCE and Minecraft on Termux:X11
 
