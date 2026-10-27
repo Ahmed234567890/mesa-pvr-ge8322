@@ -11,8 +11,13 @@ that XFCE or Minecraft is GPU-accelerated.
 - Kali's already-installed XFCE session, window manager, panel, and desktop are
   running on that display. No Kali packages were installed or removed for this
   session.
-- Prism Launcher 11.1.1 is staged privately under
-  `/opt/pvr-bridge/prism-stage` and is open on the XFCE desktop.
+- Prism Launcher 11.1.1 was removed on 2026-10-27 so a different Prism version
+  can be installed. Only the launcher was deleted: its private `user-data`
+  (instances, accounts, game data), the staged Java/Qt/GL4ES runtime and the
+  chroot remain under `/opt/pvr-bridge/prism-stage`. The `prism-x11` wrapper
+  still points at the deleted `rootfs/usr/bin/prismlauncher` until the
+  replacement is installed. A rollback copy of the 11.1.1 launcher is kept at
+  `/opt/pvr-bridge/prism-stage/backup/prism-11.1.1-launcher.tar.gz`.
 - The Prism instance named `1.12.2` is configured for demo mode. The demo-name
   prompt was reached, and a Java 21 launch was attempted after enabling Prism's
   Java-compatibility-check bypass and reducing the configured maximum heap to
@@ -62,15 +67,26 @@ The XFCE top panel initially overlapped Prism's title bar, making the window
 hard to drag. Once the title bar is visible, drag it normally. XFCE's
 Alt+left-drag window move gesture is another option when decorations are
 difficult to reach. To reposition Prism from an Android root shell, find its
-window ID and move the main (800x600) window below the panel. IDs change between
-launches:
+window ID and move the main (800x600) window below the panel. IDs and titles
+change between launches and between Prism versions; adjust the search pattern
+to the installed version:
 
 ```sh
 CH=/data/local/nhsystem/kali-armhf
 export CH
-W=$(su -c "chroot \$CH /usr/bin/env DISPLAY=:1 /usr/bin/xdotool search --onlyvisible --name 'Prism Launcher 11.1.1' | tail -n 1")
+W=$(su -c "chroot \$CH /usr/bin/env DISPLAY=:1 /usr/bin/xdotool search --onlyvisible --name 'Prism Launcher' | tail -n 1")
 su -c "chroot \$CH /usr/bin/env DISPLAY=:1 /usr/bin/xdotool windowmove $W 100 70"
 ```
+
+## Reinstalling Prism
+
+Only the 11.1.1 launcher was removed. `user-data` (717 MB), the staged
+Java/Qt/GL4ES runtime, the rootfs and the `prism-x11` wrapper were preserved
+under `/opt/pvr-bridge/prism-stage`. Install the replacement Prism version,
+then point `prism-x11` at the new binary and, if the new version does not
+inherit it, update the instance `JavaPath`. Do not delete the stage directory:
+it holds the instances and game data. The old launcher can be restored from
+`backup/prism-11.1.1-launcher.tar.gz` if needed.
 
 ## Minecraft blockers and next steps
 

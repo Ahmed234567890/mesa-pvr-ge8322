@@ -6,6 +6,9 @@ build-*/
 *.so
 *.so.*
 
+# Fetched AOSP OpenMAX headers (see encoders/fetch-omx-headers.sh)
+.omx-headers/
+
 # Vendor blobs, firmware, and kernel modules must never be published
 *.ko
 *.fw

@@ -1,0 +1,18 @@
+LIBC_OMR1 {
+  global:
+    __cfi_slowpath;
+    __cfi_slowpath_diag;
+};
+
+LIBC_PLATFORM {
+  global:
+    __cfi_init;
+};
+
+PVR_SHIM {
+  global:
+    gbm_shim_set_real;
+    gbm_shim_stats;
+    omx_shim_set_handler;
+    amessage_post_sync;
+};

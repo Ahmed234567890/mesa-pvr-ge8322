@@ -1,0 +1,21 @@
+#!/bin/sh
+# Run the SPRD hardware video encoder from inside the Kali chroot.
+#
+# Requires the Android bind mounts (/system, /vendor, /apex, /dev) to be
+# present, which /data/local/tmp/mount-kali-gpu.sh provides.
+#
+# Usage:
+#   omx-enc-env -c h264 -w 1280 -h 720 -r 30 -b 4000000 -i in.nv12 -o out.h264
+#
+# See `omx-enc-env -h` for the full option list.
+
+PVR_BRIDGE="${PVR_BRIDGE:-/opt/pvr-bridge}"
+
+export ANDROID_ROOT=/system
+export ANDROID_DATA=/data
+export HYBRIS_LINKER_DIR="$PVR_BRIDGE/libhybris/linker"
+export HYBRIS_ANDROID_SDK_VERSION="${HYBRIS_ANDROID_SDK_VERSION:-34}"
+export HYBRIS_LD_LIBRARY_PATH="$PVR_BRIDGE/encoders/lib:/system/lib:/vendor/lib:/vendor/lib/hw:/odm/lib:/apex/com.android.runtime/lib:/apex/com.android.media/lib:/apex/com.android.media.swcodec/lib:/apex/com.android.vndk.v30/lib:/apex/com.android.vndk.v30@1/lib:/apex/com.android.vndk.v32/lib:/apex/com.android.vndk.v32@1/lib"
+export LD_LIBRARY_PATH="$PVR_BRIDGE/opengl/lib:$PVR_BRIDGE/lib:/usr/lib/arm-linux-gnueabihf"
+
+exec "$PVR_BRIDGE/encoders/bin/omx-enc" "$@"

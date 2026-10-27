@@ -30,6 +30,8 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
   blockers, and ordered next tests
 - [opengl/README.md](opengl/README.md) — vendor GLES/libhybris bring-up, smoke
   tests, X11 blocker, and next work
+- [encoders/README.md](encoders/README.md) — SPRD hardware H.264/HEVC encoders
+  through libhybris, including the Android 14 shim and the two vendor patches
 - [TERMUX-X11-DESKTOP.md](TERMUX-X11-DESKTOP.md) — XFCE startup and Prism/Minecraft
   status on the phone's Termux:X11 display
 - [bridge/README.md](bridge/README.md) — vendor Vulkan HAL → libhybris →

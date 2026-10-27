@@ -152,6 +152,9 @@ is `/tmp/opencode/phone-vendor-vkmark-full.log` and is not part of the repo.
 - Vendor-HAL `vkcube` presentation on Termux:X11 display `:1`.
 - The full vendor-HAL `vkmark` default scene suite on the GE8322, with the
   vsync-capped result above.
+- The SPRD hardware H.264 and HEVC encoders through libhybris: 320x240,
+  640x480 and 1280x720 streams produced from NV12/I420 input decode cleanly in
+  `ffmpeg`, in file and pipe modes. See [encoders/README.md](encoders/README.md).
 - Mesa ICD enumeration, device creation, and dummy HWRT initialization only.
 
 ### Known failures and blockers
@@ -226,14 +229,48 @@ Proprietary vendor libraries, the downloaded package, executables, and cores
 remain outside this repository. See [opengl/README.md](opengl/README.md) for
 evidence and next steps.
 
+## Hardware video encoders
+
+On 2026-10-27 the vendor SPRD OpenMAX IL encoders were brought up inside the
+Kali chroot through libhybris. `OMX.sprd.h264.encoder` and
+`OMX.sprd.h265.encoder` use `/dev/sprd_vsp` and `/dev/ion`. Three Android 14
+incompatibilities had to be handled: missing old `GraphicBufferMapper`
+overloads and CFI hooks (supplied by a freestanding shim), an undersized
+`AHandler` allocation in `libstagefrighthw.so` (widened from 56 to 120 bytes),
+and a broken `AMessage::post` looper path (redirected to a synchronous
+`onMessageReceived` call by rewriting one GOT slot).
+
+Verified streams, pulled to a desktop and decoded with `ffmpeg`:
+
+| Codec | Size | Input | Frames | Result |
+| --- | --- | --- | --- | --- |
+| H.264 | 320x240 | NV12 | 30 | decodes |
+| H.264 | 640x480 | I420 | 25 | decodes |
+| H.264 | 1280x720 | NV12 | 30 | decodes, ~470 KB |
+| HEVC | 320x240 | NV12 | 30 | decodes |
+| HEVC | 1280x720 | NV12 | 30 | decodes, ~468 KB |
+
+The output is Constrained Baseline H.264 (no B-frames) and Main-profile HEVC.
+The tool is `omx-enc` in `/opt/pvr-bridge/encoders/bin`, wrapped by
+`omx-enc-env`, and accepts raw NV12/I420 on stdin or a file and writes an
+elementary stream to stdout or a file, so it can be piped from/to `ffmpeg`.
+Decoding through OpenMAX, VP8/MPEG-4/H.263 encoding, rate-control tuning, and
+long-lived use in a single process are not verified. `OMX_FreeHandle`/
+`OMX_Deinit` are deliberately skipped because unloading the vendor codec
+aborts in libhybris's TLS-module teardown; the one-shot CLI exits instead.
+See [encoders/README.md](encoders/README.md) for the stack, patches, build and
+usage.
+
 ## XFCE and Minecraft on Termux:X11
 
 On 2026-10-26, the existing Kali XFCE session was started on Termux:X11 display
 `:1` without installing/removing Kali packages. The XFCE panel configuration
 had an unavailable `null` plugin; removing that invalid panel entry allowed
-the desktop to appear. Prism Launcher 11.1.1 was open on the XFCE desktop. Its
-title bar was initially obscured by the top panel; moving the window below the
-panel restored normal dragging.
+the desktop to appear. Prism Launcher 11.1.1 was open on the XFCE desktop; on
+2026-10-27 only that launcher was removed so a different Prism version can be
+installed, while its private `user-data`, staged runtime and chroot were kept.
+Its title bar was initially obscured by the top panel; moving the window below
+the panel restored normal dragging.
 
 The Prism `1.12.2` instance reached the **Play Demo** flow with a demo player
 name. Launch was tested using the staged ARMHF Java 21 runtime, Prism's Java
