@@ -19,8 +19,8 @@ readiness or Vulkan conformance.
 | Full `vkmark` suite | Not run: Mesa queue-submit and swapchain paths are blocked | Pass; score 60, each scene 60 FPS with FIFO/vsync |
 | OpenGL ES pbuffer | Mesa Zink/OpenGL not tested | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, GLES 3.2, readback `64 128 191 255` |
 | OpenGL ES X11 smoke probe | Mesa path not tested | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, X window visible, readback `64 128 191 255` |
-| `glmark2-es2-x11 --validate` via vendor GLES | Mesa path not tested | Reports GE8322 and validates most scenes, but exits with SIGSEGV |
-| `glmark2-es2-x11` timed scene via vendor GLES | Mesa path not tested | Renders visible GE8322 scenes; `--run-forever` is stable, one-shot teardown still crashes |
+| `glmark2-es2-x11 --validate` via vendor GLES | Mesa path not tested | Pass: reports GE8322, validates scenes, exits 0 |
+| `glmark2-es2-x11` timed scene via vendor GLES | Mesa path not tested | Pass: renders visible GE8322 scenes, `--run-forever` and one-shot both exit 0 |
 | `glmark2-es2 --off-screen --validate` via default EGL | Reports Mesa llvmpipe | Most validation cases pass; software GLES, not GE8322 |
 
 `vulkaninfo --summary` reported API `1.2.363`, device `PowerVR Rogue GE8322`,
@@ -257,13 +257,39 @@ shows moving `build` and textured `texture` scenes visibly on Termux:X11. The
 live build loop reports roughly 154–163 FPS; the texture scene reported 168
 FPS. This confirms GLES drawing and X11 swaps with the XPutImage fallback.
 Without disabling SHM, the first timed scene crashes because the current shim
-does not check `shmat()` failure. A one-shot run still segfaults at shutdown;
-the long-running test was stopped after recording visible output. The regular
+does not check `shmat()` failure. One-shot runs used to segfault at shutdown;
+`libhybris-egl-terminate-order.patch` fixes that (see below), and both windowed
+and off-screen one-shot runs now exit 0. The regular
 GLX `glmark2 --validate` and default-EGL `glmark2-es2 --off-screen --validate`
 report Mesa `llvmpipe`, so those runs remain software-rendered. Proprietary
 vendor libraries, the downloaded package, executables, and cores remain outside
 this repository. See [opengl/README.md](opengl/README.md) for evidence and next
 steps.
+
+### One-shot teardown crash
+
+Every GLES application used to die with `SIGSEGV` while exiting: windowed and
+off-screen, with and without SHM, and on the null platform. The crash was
+deterministic without a debugger (`rc=139` on 6/6 runs) and often disappeared
+under `gdb` because it is timing-sensitive.
+
+A core dump showed `PC` in an unmapped gap next to `libX11` and `LR` inside
+`libIMGegl.so`, i.e. a call into memory that had been unmapped. Suppressing
+`dlclose()` with `diagnostics/nodlclose.c` made 4/4 runs exit 0, which pointed
+at `ws_Terminate()` in `hybris/egl/ws.c`: libhybris unloaded
+`eglplatform_x11.so` *before* calling the vendor `eglTerminate()`, and the
+vendor driver still calls window/buffer callbacks in that module while
+terminating the display.
+
+`patches/libhybris-egl-terminate-order.patch` moves the vendor `eglTerminate()`
+ahead of `ws_Terminate()`. With it, windowed and off-screen `glmark2-es2`
+runs exit 0 and the harness reports `PASS glmark2-oneshot`.
+
+`diagnostics/tls-probe.c` also proved that the vendor driver writes bionic TLS
+slots that alias glibc's thread-local data (`tp+16`, `tp+32`, `tp+52`). The
+`tcb-restore` prototype did not fix this crash — the snapshot is taken after
+glibc has already left a sentinel in that slot — but the aliasing remains a
+latent hazard for long-running applications and is tracked separately.
 
 ## Hardware video encoders
 
