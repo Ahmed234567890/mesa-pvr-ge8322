@@ -309,5 +309,9 @@ Minecraft menu nor 1.12.2 rendering on the GE8322 has been verified. See
 window recovery, privacy boundary, and next steps.
 
 This XFCE result means the desktop session is visible on Termux:X11; it is not
-evidence that XFCE is GPU-rendered. The separate vendor GLES and Mesa results
-above remain distinct.
+evidence that XFCE is GPU-rendered. With the session running,
+`glmark2-es2-x11 --benchmark build --run-forever` rendered the GE8322 build
+scene in a decorated XFCE window over the desktop, which combines the verified
+vendor GLES path with a real window manager and X11 desktop. The desktop itself
+still draws through X11, not the vendor GLES path. The separate vendor GLES and
+Mesa results above remain distinct.

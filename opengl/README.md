@@ -120,9 +120,10 @@ The installed Kali `glmark2` executable uses GLX (`libGL.so` / `glX*`) and
 reports llvmpipe. The `glmark2-es2-x11` executable was downloaded and extracted
 to private staging only (not installed into Kali). With the X11 platform and
 `HYBRIS_X11_DISABLE_SHM=1`, it reports the GE8322 and renders a moving scene
-visibly on Termux:X11. A long-running process remains active and swaps frames;
-one-shot process shutdown still segfaults, so teardown and full-suite stability
-remain open.
+visibly on Termux:X11, including in a decorated XFCE window over the Kali
+desktop. A long-running process remains active and swaps frames; one-shot
+process shutdown still segfaults, so teardown and full-suite stability remain
+open. XFCE itself draws through X11, not this GLES path.
 
 Dynamic-loading applications initially failed because the built
 `libhybris-common.so.1.0.0` requests an executable stack and glibc refuses to
@@ -341,6 +342,8 @@ libhybris build log. Relevant files include:
 - `evidence/glmark2-es2-vendor-build-fixed.log`
 - `evidence/glmark2-es2-vendor-build-x11-fixed.log` (ctype shim + R/B swap)
 - `evidence/glmark2-vendor-x11-fixed-screen.png` (GE8322 `build` scene)
+- `evidence/glmark2-vendor-xfce-window-2026-10-27.png` (GE8322 scene in an XFCE window)
+- `evidence/xfce-desktop-termux-x11-2026-10-27.png` (XFCE desktop on Termux:X11)
 - `evidence/glmark2-vendor-wrapper-live.log`
 - `evidence/glmark2-vendor-texture-live.log`
 - `evidence/glmark2-vendor-live-screen.png` (visible rendered scene)
