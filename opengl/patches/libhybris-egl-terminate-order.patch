@@ -1,0 +1,33 @@
+diff --git a/hybris/egl/egl.c b/hybris/egl/egl.c
+--- a/hybris/egl/egl.c
++++ b/hybris/egl/egl.c
+@@ -376,16 +376,26 @@
+ 
+ 	struct _EGLDisplay *display = hybris_egl_display_get_mapping(dpy);
+ 	EGLDisplay real_display = display->dpy;
++	EGLBoolean ret = EGL_TRUE;
+ #ifdef WANT_WAYLAND
+ 	if (loaded_ws == EGL_PLATFORM_WAYLAND_KHR && current_display == dpy)
+ 		current_display = EGL_NO_DISPLAY;
+ #endif
++	/*
++	 * Terminate the vendor display before unloading the platform module.
++	 * The vendor driver keeps callbacks into that module (window create/
++	 * destroy, buffer handling) and calls them from its own eglTerminate.
++	 * Unloading first makes those calls land in unmapped memory, which
++	 * showed up as a SIGSEGV at process teardown.
++	 */
++	if (hybris_egl_display_get_mapping_for_real_display((EGLNativeDisplayType)real_display) == EGL_NO_DISPLAY) {
++		ret = (*_eglTerminate)(real_display);
++	}
++
+ 	ws_Terminate(display);
+ 	_removeMapping(display);
+ 
+-	if (hybris_egl_display_get_mapping_for_real_display((EGLNativeDisplayType)real_display) == EGL_NO_DISPLAY) {
+-		return (*_eglTerminate)(real_display);
+-	}
++	return ret;
+ }
+ 
+ const char * eglQueryString(EGLDisplay dpy, EGLint name)

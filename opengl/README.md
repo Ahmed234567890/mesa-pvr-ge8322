@@ -160,16 +160,23 @@ Set `DISPLAY` before invocation to target a different X server. This confirms a
 visible GLES path for this benchmark, not desktop OpenGL or Minecraft
 compatibility.
 
-The working libhybris build carries two local patches under `patches/`:
+The working libhybris build carries three local patches under `patches/`:
 
+- `libhybris-egl-terminate-order.patch` calls the vendor `eglTerminate()`
+  before `ws_Terminate()` unloads the platform module. The vendor driver keeps
+  callbacks into `eglplatform_x11.so` and calls them while terminating the
+  display, so unloading first sent those calls into unmapped memory and made
+  every GLES application die with `SIGSEGV` at exit.
 - `libhybris-x11-destroy-buffers.patch` removes invalid list iterator use from
   native-window buffer cleanup.
 - `libhybris-x11-swap-red-blue.patch` swaps red and blue in `copyToX11()` for
   depth-32 windows, because the vendor driver writes RGBA while libhybris
   advertises BGRA on the non-drihybris path.
 
-Neither patch eliminates the observed one-shot shutdown crash; long-running
-applications remain the current test path.
+The terminate-order patch fixes the one-shot shutdown crash: `glmark2-es2-x11`
+now exits 0 both windowed and off-screen, and `FULL=1 scripts/verify-all.sh`
+reports `PASS glmark2-oneshot`. The two X11 platform patches are still required
+for correct colours and for buffer cleanup.
 
 To build the patched module, apply the patches to a libhybris tree and rebuild
 only the X11 platform, then stage `eglplatform_x11.so` under
@@ -182,6 +189,21 @@ make -C "$LIBHYBRIS_BUILD/hybris/egl/platforms/x11" -j4 \
     -I$HOME/mesa-pvr-build/android-headers-30 \
     -I$HOME/mesa-pvr-build/android-headers-30/libnfc-nxp"
 ```
+
+The terminate-order patch lives in the EGL core rather than the X11 platform,
+so rebuild and stage `libEGL` for it (back up the previous copy first):
+
+```sh
+make -C "$LIBHYBRIS_BUILD/hybris/egl" -j4 \
+  CPPFLAGS="--sysroot=$ARMHF_SYSROOT \
+    -I$HOME/pvr-reverse/cases/ge8322-opengl/build/include \
+    -I$HOME/mesa-pvr-build/android-headers-30 \
+    -I$HOME/mesa-pvr-build/android-headers-30/libnfc-nxp"
+```
+
+Then copy `hybris/egl/.libs/libEGL.so.1.0.0` to
+`/opt/pvr-bridge/opengl/lib/` inside the chroot and re-run
+`scripts/verify-all.sh`.
 
 ## Build the diagnostic probes
 
