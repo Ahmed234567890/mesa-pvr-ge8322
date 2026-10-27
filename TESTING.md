@@ -18,9 +18,9 @@ readiness or Vulkan conformance.
 | Render/readback | No successful Mesa submission/readback verified | Vendor clear-only render/readback passed; not a Mesa result |
 | Full `vkmark` suite | Not run: Mesa queue-submit and swapchain paths are blocked | Pass; score 60, each scene 60 FPS with FIFO/vsync |
 | OpenGL ES pbuffer | Mesa Zink/OpenGL not tested | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, GLES 3.2, readback `64 128 191 255` |
-| OpenGL ES X11 smoke probe | Mesa path not tested | Fails after entering `eglCreateWindowSurface`; PC maps to stripped Kali `libX11.so.6.4.0 + 0x39886`, exact function unresolved |
+| OpenGL ES X11 smoke probe | Mesa path not tested | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, X window visible, readback `64 128 191 255` |
 | `glmark2-es2-x11 --validate` via vendor GLES | Mesa path not tested | Reports GE8322 and validates most scenes, but exits with SIGSEGV |
-| `glmark2-es2-x11` timed scene via vendor GLES | Mesa path not tested | Default swap crashes; `--frame-end none/finish/readpixels` emits diagnostic scores but crashes during shutdown |
+| `glmark2-es2-x11` timed scene via vendor GLES | Mesa path not tested | Renders visible GE8322 scenes; `--run-forever` is stable, one-shot teardown still crashes |
 | `glmark2-es2 --off-screen --validate` via default EGL | Reports Mesa llvmpipe | Most validation cases pass; software GLES, not GE8322 |
 
 `vulkaninfo --summary` reported API `1.2.363`, device `PowerVR Rogue GE8322`,
@@ -206,15 +206,32 @@ inside the Kali chroot, render a clear, and read back `64 128 191 255`; the
 reported renderer is `PowerVR Rogue GE8322`. This is verified **vendor GLES**
 execution and is not Mesa/Zink or desktop OpenGL.
 
-The custom X11 probe opens `DISPLAY=:1`, initializes EGL, chooses a config, and
-creates/maps an X window, but crashes after entering `eglCreateWindowSurface`.
-Disabling MIT-SHM or changing locale/input-method variables did not change the
-result. Its PC maps into stripped Kali `libX11.so.6.4.0 + 0x39886`; an earlier
-`_XimDecodeICATTRIBUTE` label was caused by an incorrect GDB section relocation
-and is withdrawn. The exact function/caller remains unresolved.
+The custom X11 probe now passes. Two independent faults were found:
+
+1. glibc keeps its thread-local `__ctype_b` pointer at `thread pointer + 16`,
+   which is also bionic `TLS_SLOT_OPENGL` (slot 4). Android's
+   `/system/lib/libEGL.so` constructor stores a dispatch-table pointer in that
+   slot, so Xlib's locale parser (`_XlcResolveLocaleName`) read a bionic pointer
+   as a ctype table, treated every byte as `_ISspace`, and walked off the stack
+   at `libX11 + 0x39886`. `run-x11-gles` now preloads
+   `libhybris-ctype-fix.so`, which interposes `__ctype_b_loc` and restores a
+   valid C-locale table.
+2. The EGL config exposes a depth-32 visual on a depth-24 root, so
+   `XCreateWindow` needs an explicit `border_pixel` and
+   `background_pixmap = None` or the server returns `BadMatch`.
+
+With both fixes the probe creates the window and surface, makes the context
+current, reports `PowerVR Rogue GE8322` / GLES 3.2, reads back
+`64 128 191 255`, and exits `PASS`. libhybris advertises
+`HAL_PIXEL_FORMAT_BGRA_8888` on the non-drihybris blit path while the vendor
+driver writes RGBA bytes, so `XPutImage` swapped red and blue until
+`libhybris-x11-swap-red-blue.patch` added the byte swap. The vendor
+`eglSwapBuffers` also returns `EGL_FALSE` with `eglGetError() == EGL_SUCCESS`
+on some runs; the frame is already presented in `ws_finishSwap()`, so the probe
+treats that combination as success.
 
 The `glmark2-es2-x11` package was downloaded and extracted only into private
-staging (not installed into Kali). With the new `run-x11-gles` wrapper,
+staging (not installed into Kali). With the `run-x11-gles` wrapper,
 `HYBRIS_X11_DISABLE_SHM=1`, and the vendor GLES path, glmark2 reports GE8322 and
 shows moving `build` and textured `texture` scenes visibly on Termux:X11. The
 live build loop reports roughly 154–163 FPS; the texture scene reported 168
@@ -223,13 +240,10 @@ Without disabling SHM, the first timed scene crashes because the current shim
 does not check `shmat()` failure. A one-shot run still segfaults at shutdown;
 the long-running test was stopped after recording visible output. The regular
 GLX `glmark2 --validate` and default-EGL `glmark2-es2 --off-screen --validate`
-report Mesa `llvmpipe`, so those runs remain software-rendered. The custom EGL
-smoke probe also still has its separate Xlib crash. Proprietary vendor
-libraries, the downloaded package, executables, and cores remain outside this
-repository.
-Proprietary vendor libraries, the downloaded package, executables, and cores
-remain outside this repository. See [opengl/README.md](opengl/README.md) for
-evidence and next steps.
+report Mesa `llvmpipe`, so those runs remain software-rendered. Proprietary
+vendor libraries, the downloaded package, executables, and cores remain outside
+this repository. See [opengl/README.md](opengl/README.md) for evidence and next
+steps.
 
 ## Hardware video encoders
 

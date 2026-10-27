@@ -19,10 +19,15 @@ HYBRIS_EGLPLATFORM_DIR=${HYBRIS_EGLPLATFORM_DIR:-/opt/pvr-bridge/opengl/eglplatf
 # passes shmat's (void *)-1 result to memcpy. XPutImage is the safe fallback.
 HYBRIS_X11_DISABLE_SHM=${HYBRIS_X11_DISABLE_SHM:-1}
 LD_LIBRARY_PATH="/opt/pvr-bridge/opengl/lib:/opt/pvr-bridge/lib:/usr/lib/arm-linux-gnueabihf${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Android's libEGL constructor writes bionic TLS slot 4 (thread pointer + 16),
+# which is where glibc keeps its thread-local __ctype_b pointer. Without the
+# fix, Xlib's locale parser reads a bogus ctype table and walks off the stack
+# inside eglCreateWindowSurface.
+LD_PRELOAD="/opt/pvr-bridge/opengl/lib/libhybris-ctype-fix.so${LD_PRELOAD:+:$LD_PRELOAD}"
 
 export DISPLAY ANDROID_ROOT ANDROID_DATA HYBRIS_LINKER_DIR
 export HYBRIS_ANDROID_SDK_VERSION HYBRIS_LD_LIBRARY_PATH
 export HYBRIS_EGLPLATFORM HYBRIS_EGLPLATFORM_DIR HYBRIS_X11_DISABLE_SHM
-export LD_LIBRARY_PATH
+export LD_LIBRARY_PATH LD_PRELOAD
 
 exec "$@"

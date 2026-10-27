@@ -1,0 +1,48 @@
+diff --git a/hybris/egl/platforms/x11/x11_window.cpp b/hybris/egl/platforms/x11/x11_window.cpp
+index da3bbe9..7009ae8 100644
+--- a/hybris/egl/platforms/x11/x11_window.cpp
++++ b/hybris/egl/platforms/x11/x11_window.cpp
+@@ -600,6 +600,27 @@ int X11NativeWindow::setUsage(uint64_t usage) {
+     return NO_ERROR;
+ }
+ 
++/*
++ * The PowerVR vendor EGL driver writes RGBA bytes into the native buffers on
++ * this device even though libhybris advertises HAL_PIXEL_FORMAT_BGRA_8888 for
++ * the non-drihybris path.  X11 depth-32 ZPixmap data is a 32-bit pixel value
++ * (0x00RRGGBB), so on a little-endian host the server expects BGRA byte order.
++ * Swap red and blue before handing the buffer to X.
++ */
++static void swapRedBlue(char *data, int stride, int height)
++{
++    for (int y = 0; y < height; y++)
++    {
++        unsigned char *row = (unsigned char *)data + (size_t)y * (size_t)stride;
++        for (int x = 0; x + 3 < stride; x += 4)
++        {
++            unsigned char tmp = row[x];
++            row[x] = row[x + 2];
++            row[x + 2] = tmp;
++        }
++    }
++}
++
+ void X11NativeWindow::copyToX11(X11NativeWindowBuffer *wnb) {
+     int ret;
+     void *vaddr;
+@@ -644,11 +665,15 @@ void X11NativeWindow::copyToX11(X11NativeWindowBuffer *wnb) {
+     {
+         memcpy(m_image->data, vaddr, m_image->bytes_per_line * m_image->height);
+         hybris_gralloc_unlock(wnb->handle);
++        if (m_depth == 32)
++            swapRedBlue(m_image->data, m_image->bytes_per_line, m_image->height);
+         XShmPutImage(m_display, m_window, m_gc, m_image, 0, 0, 0, 0, m_width, m_height, 0);
+     }
+     else
+     {
+         m_image->data = (char *)vaddr;
++        if (m_depth == 32)
++            swapRedBlue((char *)vaddr, wnb->stride, wnb->height);
+         XPutImage(m_display, m_window, m_gc, m_image, 0, 0, 0, 0, m_width, m_height);
+         hybris_gralloc_unlock(wnb->handle);
+     }

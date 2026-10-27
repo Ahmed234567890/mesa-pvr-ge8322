@@ -31,5 +31,10 @@ LINK_FLAGS="-L$EGL_DIR -L$GLES_DIR -L$SYSROOT_LIB -Wl,-rpath-link,$SYSROOT_LIB -
 "$CC" $COMMON_FLAGS -o "$OUT_DIR/egl-loader-smoke" \
     "$REPO_ROOT/opengl/egl-loader-smoke.c" -ldl
 
+# Preload helper for the bionic TLS_SLOT_OPENGL / glibc __ctype_b collision.
+# shellcheck disable=SC2086
+"$CC" $COMMON_FLAGS -fPIC -shared -o "$OUT_DIR/libhybris-ctype-fix.so" \
+    "$REPO_ROOT/opengl/hybris-ctype-fix.c" -ldl
+
 file "$OUT_DIR/egl-gles2-smoke" "$OUT_DIR/egl-gles2-x11-smoke" \
-     "$OUT_DIR/egl-loader-smoke"
+     "$OUT_DIR/egl-loader-smoke" "$OUT_DIR/libhybris-ctype-fix.so"

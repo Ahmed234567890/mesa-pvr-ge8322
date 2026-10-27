@@ -14,6 +14,18 @@
 
 #define STEP(message) do { fprintf(stderr, "[x11-smoke] %s\n", message); } while (0)
 
+static int x_error_count;
+
+static int on_x_error(Display *display, XErrorEvent *event)
+{
+    char text[256];
+    XGetErrorText(display, event->error_code, text, sizeof text);
+    fprintf(stderr, "[x11-smoke] X error: %s (request %d.%d, serial %lu)\n",
+            text, event->request_code, event->minor_code, event->serial);
+    ++x_error_count;
+    return 0;
+}
+
 static void fail_egl(const char *where)
 {
     fprintf(stderr, "%s failed: EGL error 0x%04x\n", where, eglGetError());
@@ -34,6 +46,7 @@ int main(void)
         return 1;
     }
     STEP("XOpenDisplay succeeded");
+    XSetErrorHandler(on_x_error);
 
     EGLDisplay display = eglGetDisplay((EGLNativeDisplayType)xdisplay);
     STEP("eglGetDisplay returned");
@@ -80,19 +93,34 @@ int main(void)
 
     const int screen = DefaultScreen(xdisplay);
     const Window root = RootWindow(xdisplay, screen);
+    fprintf(stderr, "[x11-smoke] EGL visual 0x%lx: depth %d, class %d, root depth %d\n",
+            (unsigned long)visual_id, visual_info[0].depth, visual_info[0].class,
+            DefaultDepth(xdisplay, screen));
     const Colormap colormap = XCreateColormap(xdisplay, root,
                                                visual_info[0].visual, AllocNone);
     XSetWindowAttributes window_attrs = {0};
     window_attrs.colormap = colormap;
     window_attrs.event_mask = StructureNotifyMask | ExposureMask;
+    /* The EGL visual is depth 32 while the root is depth 24.  A window whose
+     * depth differs from its parent must not inherit the parent's border or
+     * background pixmaps, or CreateWindow fails with BadMatch.  This mirrors
+     * the attribute set that glmark2's X11 canvas uses. */
+    window_attrs.background_pixmap = None;
+    window_attrs.border_pixel = 0;
     const Window window = XCreateWindow(xdisplay, root, 24, 48, 480, 640, 0,
                                          visual_info[0].depth, InputOutput,
                                          visual_info[0].visual,
-                                         CWColormap | CWEventMask, &window_attrs);
+                                         CWBackPixmap | CWBorderPixel |
+                                         CWColormap | CWEventMask,
+                                         &window_attrs);
     XFree(visual_info);
     XStoreName(xdisplay, window, "GE8322 vendor GLES smoke test");
     XMapWindow(xdisplay, window);
-    XFlush(xdisplay);
+    XSync(xdisplay, False);
+    if (x_error_count != 0) {
+        fprintf(stderr, "[x11-smoke] X window setup produced %d error(s)\n", x_error_count);
+        return 1;
+    }
     STEP("X window created and mapped");
 
     const EGLSurface surface = eglCreateWindowSurface(
@@ -141,7 +169,19 @@ int main(void)
         return 1;
     }
 
-    require_egl(eglSwapBuffers(display, surface), "eglSwapBuffers");
+    if (eglSwapBuffers(display, surface) != EGL_TRUE) {
+        const EGLint swap_error = eglGetError();
+        if (swap_error != EGL_SUCCESS) {
+            fprintf(stderr, "eglSwapBuffers failed: EGL error 0x%04x\n", swap_error);
+            return 1;
+        }
+        /* The vendor eglSwapBuffers returns EGL_FALSE on this libhybris X11
+         * backend even though ws_finishSwap() has already presented the frame
+         * and no EGL error was raised. */
+        STEP("eglSwapBuffers returned EGL_FALSE with EGL_SUCCESS (frame presented)");
+    } else {
+        STEP("eglSwapBuffers succeeded");
+    }
     sleep(3); /* Keep the rendered window visible briefly for manual inspection. */
     require_egl(eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE,
                                EGL_NO_CONTEXT), "eglMakeCurrent(unbind)");
