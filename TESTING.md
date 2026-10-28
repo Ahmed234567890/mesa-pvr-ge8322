@@ -26,6 +26,8 @@ readiness or Vulkan conformance.
 | `glmark2 --benchmark build` (GLX) via GL4ES | llvmpipe score 39 | Pass: GE8322 score 139 at 480x320, exit 0 |
 | Vendor GLES X11 without `LD_PRELOAD` | n/a | Pass: GE8322, score 212; ctype repair is inside `libEGL` |
 | Whole XFCE session with `desktop/bin/gpu-env` | n/a | Pass: every child inherits the vendor GPU environment; no preload |
+| OpenCL compute via vendor `libPVROCL.so` | Mesa rusticl only | Pass: PowerVR platform, GE8322 device, OpenCL 3.0 (OpenCL C 1.2), kernel result `11 22 33 44`, 3/3 runs |
+| OpenCL through the generated `libOpenCL.so.1` shim | n/a | Pass: an ordinary client that links `-lOpenCL` runs a kernel on the GE8322 |
 
 `vulkaninfo --summary` reported API `1.2.363`, device `PowerVR Rogue GE8322`,
 and conformance version `1.4.3.3`. The latter is a driver-reported property,

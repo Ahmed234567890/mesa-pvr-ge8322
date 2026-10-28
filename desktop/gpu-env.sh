@@ -24,13 +24,14 @@
 GPU_BRIDGE=${GPU_BRIDGE:-/opt/pvr-bridge}
 GPU_EGL_DIR=${GPU_EGL_DIR:-$GPU_BRIDGE/opengl/lib}
 GPU_GL4ES_DIR=${GPU_GL4ES_DIR:-$GPU_BRIDGE/gl4es/lib}
+GPU_OPENCL_DIR=${GPU_OPENCL_DIR:-$GPU_BRIDGE/opencl/lib}
 GPU_LIB_DIR=${GPU_LIB_DIR:-$GPU_BRIDGE/lib}
 
 # Desktop OpenGL selection. GL4ES has to precede Mesa's libGL.so.1.
 if [ "${PVR_DESKTOP_GL:-gl4es}" = "gl4es" ]; then
-    LD_LIBRARY_PATH="$GPU_GL4ES_DIR:$GPU_EGL_DIR:$GPU_LIB_DIR:/usr/lib/arm-linux-gnueabihf"
+    LD_LIBRARY_PATH="$GPU_GL4ES_DIR:$GPU_EGL_DIR:$GPU_OPENCL_DIR:$GPU_LIB_DIR:/usr/lib/arm-linux-gnueabihf"
 else
-    LD_LIBRARY_PATH="$GPU_EGL_DIR:$GPU_LIB_DIR:/usr/lib/arm-linux-gnueabihf"
+    LD_LIBRARY_PATH="$GPU_EGL_DIR:$GPU_OPENCL_DIR:$GPU_LIB_DIR:/usr/lib/arm-linux-gnueabihf"
 fi
 if [ -n "${LD_LIBRARY_PATH_EXTRA:-}" ]; then
     LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$LD_LIBRARY_PATH_EXTRA"

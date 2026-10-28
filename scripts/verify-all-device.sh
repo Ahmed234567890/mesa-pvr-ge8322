@@ -146,6 +146,40 @@ else
     fail "vulkan-vendor-present"
 fi
 
+echo "=== OpenCL (vendor libPVROCL through libhybris) ==="
+
+if [ ! -x "$CH/opt/pvr-bridge/opengl/bin/opencl-probe" ]; then
+    fail "opencl-vendor-compute (opencl-probe missing)"
+elif timeout 120 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+        LD_LIBRARY_PATH=/opt/pvr-bridge/lib:/usr/lib/arm-linux-gnueabihf \
+        ANDROID_ROOT=/system ANDROID_DATA=/data \
+        HYBRIS_LINKER_DIR=/opt/pvr-bridge/libhybris/linker \
+        HYBRIS_ANDROID_SDK_VERSION=34 \
+        HYBRIS_LD_LIBRARY_PATH=/system/lib:/vendor/lib:/vendor/lib/hw:/odm/lib:/apex/com.android.runtime/lib \
+        /opt/pvr-bridge/opengl/bin/opencl-probe >"$TMPD/opencl.log" 2>&1 \
+        && grep -q "opencl-probe: PASS" "$TMPD/opencl.log"; then
+    cl_device=$(sed -n 's/^opencl-probe: device name      = //p' "$TMPD/opencl.log" | head -n 1)
+    cl_version=$(sed -n 's/^opencl-probe: platform version = //p' "$TMPD/opencl.log" | head -n 1)
+    pass "opencl-vendor-compute ($cl_device, $cl_version)"
+else
+    fail "opencl-vendor-compute"
+fi
+
+if [ ! -x "$CH/opt/pvr-bridge/opengl/bin/opencl-shim-smoke" ]; then
+    fail "opencl-app-shim (opencl-shim-smoke missing)"
+elif timeout 120 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+        LD_LIBRARY_PATH=/opt/pvr-bridge/opencl/lib:/opt/pvr-bridge/lib:/usr/lib/arm-linux-gnueabihf \
+        ANDROID_ROOT=/system ANDROID_DATA=/data \
+        HYBRIS_LINKER_DIR=/opt/pvr-bridge/libhybris/linker \
+        HYBRIS_ANDROID_SDK_VERSION=34 \
+        HYBRIS_LD_LIBRARY_PATH=/system/lib:/vendor/lib:/vendor/lib/hw:/odm/lib:/apex/com.android.runtime/lib \
+        /opt/pvr-bridge/opengl/bin/opencl-shim-smoke >"$TMPD/opencl-shim.log" 2>&1 \
+        && grep -q "opencl-shim-smoke: PASS" "$TMPD/opencl-shim.log"; then
+    pass "opencl-app-shim (libOpenCL.so.1 forwards to vendor driver)"
+else
+    fail "opencl-app-shim"
+fi
+
 echo "=== hardware video encode ==="
 
 # 320x240 NV12 black frame, three frames, encoded on the SPRD H.264 core.

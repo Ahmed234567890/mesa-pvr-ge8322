@@ -24,7 +24,10 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > `eglTerminate` ordering fix. Desktop OpenGL 2.1 is available through GL4ES on
 > the vendor GLES driver (`GL4ES using PowerVR Rogue GE8322`, `glmark2` score
 > 139 versus 39 on llvmpipe), and the XFCE session exports that environment to
-> every child. Mesa GLX still reports llvmpipe, and OpenGL 3.x/4.x is not
+> every child. The vendor OpenCL driver also works through libhybris: it reports
+> OpenCL 3.0 (OpenCL C 1.2) with 1 compute unit, runs real kernels, and a
+> generated `libOpenCL.so.1` shim lets ordinary `-lOpenCL` applications reach
+> the GPU. Mesa GLX still reports llvmpipe, and OpenGL 3.x/4.x is not
 > available on this hardware.
 
 ## Start here
