@@ -1,17 +1,23 @@
-# Hardware video encoders (SPRD / Unisoc)
+# Hardware video encoders and decoders (SPRD / Unisoc)
 
-This is the hardware-encoding counterpart to the vendor Vulkan/GLES work. It
-drives the phone's SPRD OpenMAX IL components through libhybris inside the Kali
-chroot, so Kali applications can encode H.264 or HEVC on the dedicated video
-sub-processor instead of the CPU.
+This is the video counterpart to the vendor Vulkan/GLES work. It drives the
+phone's SPRD OpenMAX IL components through libhybris inside the Kali chroot, so
+Kali applications can encode and decode on the dedicated video sub-processor
+instead of the CPU.
 
 > **Status:** verified on the phone (SM-A032F, Android 14, armhf Kali).
-> `OMX.sprd.h264.encoder` and `OMX.sprd.h265.encoder` produce elementary
-> streams that `ffmpeg` decodes cleanly at 320x240, 640x480 and 1280x720,
-> from NV12 or I420 input, in file and pipe modes. The software
-> `OMX.sprd.mpeg4.encoder` and `OMX.sprd.h263.encoder` also work at 640x480.
-> Decoding through OpenMAX, VP8 encoding, and rate-control tuning are **not**
-> verified.
+>
+> *Encoding:* `OMX.sprd.h264.encoder` and `OMX.sprd.h265.encoder` produce
+> elementary streams that `ffmpeg` decodes cleanly at 320x240, 640x480 and
+> 1280x720, from NV12 or I420 input, in file and pipe modes. The software
+> `OMX.sprd.mpeg4.encoder` and `OMX.sprd.h263.encoder` also work.
+>
+> *Decoding:* `omx-dec` decodes H.264, HEVC, MPEG-4, H.263 and VP9 in hardware.
+> H.264, HEVC and VP9 are bit-exact against FFmpeg's software decoder at
+> 320x240, 640x480 and 1280x720; MPEG-4 matches luma exactly and chroma within
+> ±1; H.263 is bit-exact. NV12 and I420 output are both verified.
+>
+> VP8 encoding, AV1 decoding, and rate-control tuning are **not** verified.
 
 ## What the vendor exposes
 
@@ -23,6 +29,22 @@ sub-processor instead of the CPU.
 | `OMX.sprd.h265.encoder` | `libomx_hevcenc_hw_sprd.so` | `/dev/sprd_vsp` |
 | `OMX.sprd.mpeg4.encoder` | `libomx_m4vh263enc_sw_sprd.so` | CPU |
 | `OMX.sprd.h263.encoder` | `libomx_m4vh263enc_sw_sprd.so` | CPU |
+
+and these decoders:
+
+| Component | Library | Runs on | Verified |
+| --- | --- | --- | --- |
+| `OMX.sprd.h264.decoder` | `libomx_avcdec_hw_sprd.so` | `/dev/sprd_vsp` | yes |
+| `OMX.sprd.hevc.decoder` | `libomx_hevcdec_hw_sprd.so` | `/dev/sprd_vsp` | yes |
+| `OMX.sprd.mpeg4.decoder` | `libomx_m4vh263dec_hw_sprd.so` | `/dev/sprd_vsp` | yes |
+| `OMX.sprd.h263.decoder` | `libomx_m4vh263dec_hw_sprd.so` | `/dev/sprd_vsp` | yes |
+| `OMX.sprd.vp9.decoder` | `libomx_vp9dec_hw_sprd.so` | `/dev/sprd_vsp` | yes |
+| `OMX.sprd.vpx.decoder` | `libomx_vpxdec_hw_sprd.so` | `/dev/sprd_vsp` | not driven |
+| `OMX.sprd.av1.decoder` | `libomx_av1dec_sw_sprd.so` | CPU | no (headers lack the enum) |
+
+`/vendor/etc/media_codecs.xml` marks the MPEG-4/H.263 decoders with
+`requires-allocate-on-output-ports` and `needs-flush-before-disable`, and
+limits them to 1920x2032. The H.264/HEVC decoders are limited to 1920x3840.
 
 There is **no VP8 encoder component**. The core registers
 `OMX.sprd.vpx.decoder` only, and while `/vendor/lib/libomx_vpxenc_hw_sprd.so`
@@ -42,7 +64,7 @@ There is no `/dev/video*` node and no VA-API/V4L2-M2M stack, so FFmpeg's
 ## Stack
 
 ```text
-omx-enc (glibc, Kali armhf)
+omx-enc / omx-dec (glibc, Kali armhf)
   |  dlopen libhybris-common
   |  hybris_dlopen / hybris_dlsym
   v
@@ -55,10 +77,23 @@ libhybris (Android 14 q linker)
   |
   +-- libsprd_omx_core.so
         +-- libstagefrighthw.so   SprdSimpleOMXComponent
-              +-- libomx_avcenc_hw_sprd.so / libomx_hevcenc_hw_sprd.so
-              |     +-- /dev/sprd_vsp, /dev/ion
-              +-- libomx_m4vh263enc_sw_sprd.so   (MPEG-4 / H.263, CPU)
+              |
+              +-- encoders
+              |     +-- libomx_avcenc_hw_sprd.so
+              |     +-- libomx_hevcenc_hw_sprd.so
+              |     |     +-- /dev/sprd_vsp, /dev/ion
+              |     +-- libomx_m4vh263enc_sw_sprd.so   (MPEG-4 / H.263, CPU)
+              |
+              +-- decoders
+                    +-- libomx_avcdec_hw_sprd.so
+                    +-- libomx_hevcdec_hw_sprd.so
+                    +-- libomx_m4vh263dec_hw_sprd.so    (MPEG-4 / H.263)
+                    +-- libomx_vp9dec_hw_sprd.so
+                          +-- /dev/sprd_vsp, /dev/ion
 ```
+
+`omx-dec` reuses the encoder's libhybris bootstrap, `libgbm-shim.so`, and the
+`libstagefrighthw.so` handler/`AMessage::post` patches unchanged.
 
 ## Why the shim and the two patches
 
@@ -121,9 +156,9 @@ one-shot CLI; a long-lived server would need a linker-side fix.
 
 ## Build and install
 
-The shim is cross-compiled on the host; `omx-enc` itself is compiled inside the
-armhf chroot. The OpenMAX headers are standard AOSP headers (Apache-2.0) and
-are fetched at build time, not vendored.
+The shim is cross-compiled on the host; `omx-enc` and `omx-dec` are compiled
+inside the armhf chroot. The OpenMAX headers are standard AOSP headers
+(Apache-2.0) and are fetched at build time, not vendored.
 
 ```sh
 cd encoders
@@ -138,14 +173,17 @@ That installs, inside the Kali chroot:
 ```text
 /opt/pvr-bridge/encoders/bin/omx-enc
 /opt/pvr-bridge/encoders/bin/omx-enc-env
+/opt/pvr-bridge/encoders/bin/omx-dec
+/opt/pvr-bridge/encoders/bin/omx-dec-env
 /opt/pvr-bridge/encoders/lib/libgbm-shim.so
 /opt/pvr-bridge/encoders/include/OMX_*.h
 ```
 
-`omx-enc-env` sets the libhybris environment and execs `omx-enc`, so it can be
-called directly from a Kali shell once the Android bind mounts are present.
+`omx-enc-env` and `omx-dec-env` set the libhybris environment and exec the
+matching tool, so they can be called directly from a Kali shell once the
+Android bind mounts are present.
 
-## Usage
+## Encoder usage
 
 ```text
 omx-enc -c h264|h265|mpeg4|h263 [-w W] [-h H] [-r FPS] [-b BPS]
@@ -198,7 +236,7 @@ ffprobe -v error -count_frames -select_streams v:0 \
 ffmpeg -v error -i out.h264 -f null -
 ```
 
-## Verified results
+## Encoder verified results
 
 All runs used the phone's vendor components through libhybris in the Kali
 chroot, then the stream was pulled to a desktop and checked with FFmpeg.
@@ -230,6 +268,142 @@ Without `-f m4v` FFmpeg may still probe MPEG-4 correctly, but the raw stream
 carries no timestamps, so decoding to the null muxer can print a
 "non monotonically increasing dts" warning. The frame count is still correct.
 
+## Decoder usage
+
+```text
+omx-dec -c h264|h265|h263|mpeg4|vp9 [-p nv12|i420]
+        [-i IN|-] [-o OUT|-] [-n FRAMES] [-q] [-v] [--info]
+```
+
+| Option | Meaning |
+| --- | --- |
+| `-c` | `h264`, `h265`, `h263`, `mpeg4` (Annex B / start-code streams) or `vp9` (IVF); required |
+| `-p` | output layout: `nv12` (default) or `i420` |
+| `-i`, `-o` | input/output path, `-` for stdin/stdout |
+| `-n` | stop after N output frames (default: until EOS) |
+| `-q`, `-v` | quiet / per-frame logging |
+| `--info` | instantiate the component, print both port definitions, exit |
+
+Output is tightly packed at the visible (cropped) size: `W*H*3/2` bytes per
+frame, no stride padding. H.264/HEVC crop is honoured; for I420 the U and V
+planes are written separately.
+
+### Examples
+
+```sh
+# H.264 elementary stream -> NV12
+omx-dec-env -c h264 -i in.h264 -o out.nv12
+
+# HEVC -> planar I420
+omx-dec-env -c h265 -p i420 -i in.h265 -o out.yuv
+
+# VP9 must be IVF (DKIF); raw VP9 has no byte-level frame delimiter
+omx-dec-env -c vp9 -i in.ivf -o out.nv12
+
+# Inspect a component without decoding
+omx-dec-env -c mpeg4 --info
+```
+
+## Decoder quirks
+
+The SPRD decoder components are not fully standard-compliant. `omx-dec`
+implements the sequences that actually work; the source comments record the
+reasoning.
+
+### Output-port reconfiguration uses the Loaded reset
+
+`OMX_EventPortSettingsChanged` is handled with the same teardown Android uses
+at end of playback:
+
+```text
+Executing -> Idle -> Loaded
+  free all input and output buffers
+  read the new port definitions
+  allocate in Loaded
+Loaded -> Idle -> Executing
+  prime the output buffers
+```
+
+Two traps make the usual Android `PortDisable / free / PortEnable / allocate`
+sequence unusable here:
+
+* `OMX_CommandPortDisable` is accepted but **never completes**. The port is
+  left in `PortInfo::DISABLING` (`mTransition = 1`), and the matching
+  `OMX_CommandPortEnable` then hits
+  `SprdSimpleOMXComponent.cpp:621 CHECK_EQ(port->mTransition, PortInfo::NONE)`.
+* `FreeBuffer()` asserts unless the port is disabled or the component is in
+  `Loaded` (`SprdSimpleOMXComponent.cpp:249`).
+
+The `Loaded` reset satisfies both: freeing is legal in `Loaded`, and no port
+command is needed.
+
+### Reconfiguration rewinds submission
+
+After a `Loaded` reset every input buffer is gone, so `omx-dec` restarts the
+stream:
+
+* H.264 / HEVC: from the most recent SPS (NAL type 7 / 33).
+* MPEG-4 / H.263 / VP9: from byte 0, because their headers are not repeated.
+
+This is why HEVC at 320x240 and MPEG-4/H.263 (which start at the component's
+352x288 default and shrink to the real size) need the reset even though H.264
+at the same resolution does not.
+
+### Input and output are interleaved
+
+Hardware decoders stop consuming input once every output buffer is full.
+`omx-dec` therefore drains and re-primes output buffers *while* it submits
+input, instead of submitting the whole stream first.
+
+### Per-codec framing
+
+| Codec | Unit submitted per buffer |
+| --- | --- |
+| H.264 | one Annex B NAL unit |
+| HEVC | one Annex B NAL unit |
+| MPEG-4 | one VOP (`00 00 01 b6`), with VOS/VO/VOL folded into the first frame |
+| H.263 | one picture, split on the 22-bit PSC (`00 00 10xxxxxx`) |
+| VP9 | one IVF frame |
+
+MPEG-4 folding matches Android's `MPEG4Source`, which prepends the VOL header
+to the first sample. H.263 does not use `00 00 01` start codes at all, which is
+why a generic Annex B splitter submits nothing for it.
+
+### Teardown
+
+Like the encoder, `omx-dec` does not call `OMX_FreeHandle()`/`OMX_Deinit()`:
+unloading the vendor codec aborts inside libhybris's
+`unregister_tls_module()`. The process exits and the kernel reclaims the
+mappings.
+
+## Decoder verified results
+
+Each stream was decoded on the phone, pulled to a desktop, and compared with
+FFmpeg's software decoder for the same stream. "Bit-exact" means every byte of
+every frame matches.
+
+| Codec | Size | Frames | Output | Comparison |
+| --- | --- | --- | --- | --- |
+| H.264 | 320x240 | 30 | NV12 | bit-exact |
+| H.264 | 320x240 | 30 | I420 | bit-exact |
+| H.264 | 640x480 | 30 | NV12 | bit-exact |
+| H.264 | 1280x720 | 10 | NV12 | bit-exact |
+| HEVC | 320x240 | 30 | NV12 | bit-exact |
+| HEVC | 640x480 | 30 | NV12 | bit-exact |
+| HEVC | 1280x720 | 10 | NV12 | bit-exact |
+| MPEG-4 | 320x240 | 30 | NV12 | luma bit-exact, chroma ±1 |
+| H.263 | 320x240 | 30 | NV12 | bit-exact |
+| VP9 | 320x240 | 30 | NV12 | bit-exact |
+
+The MPEG-4 ±1 is a chroma rounding convention difference: the encoder input was
+neutral 128, the hardware decoder returns 128, and FFmpeg's MPEG-4 decoder
+returns 127. Luma is identical.
+
+The device harness (`scripts/verify-all-device.sh`) checks each codec end to
+end: it encodes three flat frames with `omx-enc`, decodes them with `omx-dec`,
+and requires exactly `3 * 115200` bytes. VP9 uses the committed IVF fixture in
+`testdata/` because there is no VP9 encoder on the device.
+
 ## Persisting the bind mounts
 
 The encoders need `/system`, `/vendor`, `/apex`, `/dev`, `/proc` and `/sys`
@@ -259,3 +433,7 @@ Both scripts only touch the chroot's Android mount points; the chroot itself,
 This directory contains only our own source and setup scripts. It does not
 include vendor libraries, firmware, OMX headers, captured video, or device
 logs. `.omx-headers/` and `build/` are generated locally and ignored by git.
+
+`testdata/` holds one synthetic 143-byte VP9 IVF fixture (flat grey frames,
+generated with FFmpeg) so the device harness can exercise the VP9 decoder. It
+contains no user, game, or device data.

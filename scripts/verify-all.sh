@@ -44,6 +44,13 @@ mkdir -p "$OUT_DIR"
     exit 1
 }
 
+# VP9 has no byte-level frame delimiter, so the device needs a small IVF
+# fixture for the hardware decode check.
+if [ -f "$ROOT/encoders/testdata/vp9-320x240-3f.ivf" ]; then
+    "${ADB[@]}" push "$ROOT/encoders/testdata/vp9-320x240-3f.ivf" \
+        /data/local/tmp/vp9-320x240-3f.ivf >/dev/null 2>&1 || true
+fi
+
 # Run detached from the ADB console; the log file is the source of truth.
 "${ADB[@]}" shell "su -c 'rm -f $DEV_LOG; FULL=$FULL sh /data/local/tmp/verify-all-device.sh > $DEV_LOG 2>&1; echo rc=\$? >> $DEV_LOG'" \
     >/dev/null 2>&1

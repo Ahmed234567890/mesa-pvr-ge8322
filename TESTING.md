@@ -55,8 +55,16 @@ reports as online, which avoids the wireless port rotating between sessions.
 The matrix covers: chroot and Android bind mounts, the X server and a client
 handshake, the vendor GLES pbuffer and X11 probes, the desktop OpenGL baseline
 renderer, the GL4ES desktop path on the vendor GPU, the vendor Vulkan ICD
-(`vulkaninfo`, compute submit, presentation), an H.264 hardware encode plus an
-`ffmpeg` decode check, and the XFCE session.
+(`vulkaninfo`, compute submit, presentation), the vendor OpenCL driver and its
+forwarding shim, hardware H.264/HEVC/MPEG-4/H.263 encoding, hardware decoding
+of all five supported codecs plus I420 output, and the XFCE session.
+
+Each decode check encodes three flat 320x240 frames on the device, decodes them
+through `omx-dec`, and requires exactly `3 * 115200` bytes of NV12 (or I420).
+VP9 is fed the committed IVF fixture in `encoders/testdata/` because the device
+has no VP9 encoder.
+
+With `FULL=1` the current matrix is **28/28 PASS, 0 FAIL, 0 XFAIL**.
 Checks that are tracked as known limitations report `XFAIL` and do not fail the
 run. Logs are written under `/tmp/opencode/`, never into the repository.
 
@@ -191,8 +199,13 @@ is `/tmp/opencode/phone-vendor-vkmark-full.log` and is not part of the repo.
 - The SPRD hardware H.264 and HEVC encoders through libhybris: 320x240,
   640x480 and 1280x720 streams produced from NV12/I420 input decode cleanly in
   `ffmpeg`, in file and pipe modes. The vendor software MPEG-4 and H.263
-  encoders also produce decodable 640x480 streams. There is no VP8 encoder
-  component on this build. See [encoders/README.md](encoders/README.md).
+  encoders also produce decodable streams. There is no VP8 encoder component
+  on this build.
+- The SPRD hardware decoders through `omx-dec`: H.264, HEVC, MPEG-4, H.263 and
+  VP9, at 320x240, 640x480 and 1280x720, with NV12 and I420 output. H.264,
+  HEVC, H.263 and VP9 are bit-exact against FFmpeg's software decoder; MPEG-4
+  luma is bit-exact and chroma differs by ±1 from rounding.
+  See [encoders/README.md](encoders/README.md).
 - Mesa ICD enumeration, device creation, and dummy HWRT initialization only.
 
 ### Known failures and blockers
@@ -313,7 +326,7 @@ slots that alias glibc's thread-local data (`tp+16`, `tp+32`, `tp+52`). The
 glibc has already left a sentinel in that slot — but the aliasing remains a
 latent hazard for long-running applications and is tracked separately.
 
-## Hardware video encoders
+## Hardware video encoders and decoders
 
 On 2026-10-27 the vendor SPRD OpenMAX IL encoders were brought up inside the
 Kali chroot through libhybris. `OMX.sprd.h264.encoder` and
@@ -344,12 +357,35 @@ elementary stream to stdout or a file, so it can be piped from/to `ffmpeg`.
 `-c mpeg4` and `-c h263` drive the vendor's software components, not the VSP.
 There is no VP8 encoder component on this build: the core registers only
 `OMX.sprd.vpx.decoder`, and `libomx_vpxenc_hw_sprd.so` exports no OpenMAX
-symbols, so `-c vp8` is rejected. Decoding through OpenMAX, rate-control
-tuning, and long-lived use in a single process are not verified.
+symbols, so `-c vp8` is rejected. Rate-control tuning and long-lived use in a
+single process are not verified.
 `OMX_FreeHandle`/`OMX_Deinit` are deliberately skipped because unloading the
 vendor codec aborts in libhybris's TLS-module teardown; the one-shot CLI exits
-instead. See [encoders/README.md](encoders/README.md) for the stack, patches,
-build and usage.
+instead.
+
+On 2026-10-28 hardware decoding was added with `omx-dec`, reusing the same
+libhybris bootstrap and `libstagefrighthw.so` patches. Streams were decoded on
+the phone and compared byte for byte with FFmpeg's software decoder:
+
+| Codec | Size | Frames | Output | Comparison |
+| --- | --- | --- | --- | --- |
+| H.264 | 320x240, 640x480, 1280x720 | 30/30/10 | NV12, I420 | bit-exact |
+| HEVC | 320x240, 640x480, 1280x720 | 30/30/10 | NV12 | bit-exact |
+| MPEG-4 | 320x240 | 30 | NV12 | luma bit-exact, chroma ±1 |
+| H.263 | 320x240 | 30 | NV12 | bit-exact |
+| VP9 | 320x240 | 30 | NV12 | bit-exact |
+
+The vendor decoder needs a non-standard reconfiguration sequence. It never
+completes `OMX_CommandPortDisable` (leaving the port in `PortInfo::DISABLING`,
+so the matching `PortEnable` trips a vendor `CHECK_EQ`), and `FreeBuffer()`
+asserts unless the component is in `Loaded`. `omx-dec` therefore performs the
+full `Idle -> Loaded -> free all buffers -> allocate -> Idle -> Executing` reset
+and rewinds submission to the most recent SPS (H.264/HEVC) or to the start of
+the stream (MPEG-4/H.263/VP9). Input and output are interleaved because the
+hardware decoder stops consuming input when its output buffers are full.
+
+See [encoders/README.md](encoders/README.md) for the stack, patches, per-codec
+framing, build and usage.
 
 ## XFCE and Minecraft on Termux:X11
 
