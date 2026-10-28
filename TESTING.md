@@ -17,7 +17,7 @@ readiness or Vulkan conformance.
 | `vkcube` on Termux:X11 `:1` | Fail: swapchain ioctl ID 11 / func 2 returns `EINVAL`; aborts before verified rendering | Pass; visible cube verified |
 | Render/readback | No successful Mesa submission/readback verified | Vendor clear-only render/readback passed; not a Mesa result |
 | Full `vkmark` suite | Not run: Mesa queue-submit and swapchain paths are blocked | Pass; score 60, each scene 60 FPS with FIFO/vsync |
-| OpenGL ES pbuffer | Zink gated out: vendor ICD lacks `VK_EXT_robustness2.nullDescriptor` | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, GLES 3.2, readback `64 128 191 255` |
+| OpenGL ES pbuffer | Zink starts but caps at GL 2.1 (vendor ICD has no `VK_EXT_transform_feedback`) and crashes on the first draw | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, GLES 3.2, readback `64 128 191 255` |
 | OpenGL ES X11 smoke probe | Mesa path not tested | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, X window visible, readback `64 128 191 255` |
 | `glmark2-es2-x11 --validate` via vendor GLES | Mesa path not tested | Pass: reports GE8322, validates scenes, exits 0 |
 | `glmark2-es2-x11` timed scene via vendor GLES | Mesa path not tested | Pass: renders visible GE8322 scenes, `--run-forever` and one-shot both exit 0 |
@@ -57,6 +57,8 @@ handshake, the vendor GLES pbuffer and X11 probes, the EGL platform probe
 (`EGL_EXT_platform_base` / `EGL_EXT_platform_x11` advertisement plus
 `eglGetPlatformDisplayEXT` and `eglCreatePlatformWindowSurfaceEXT`), the
 desktop OpenGL baseline renderer, the GL4ES desktop path on the vendor GPU, the
+Zink screen (with `SYSVK_ENABLE_RB2=1`; it must still start and still report
+GL 2.1, with the first-draw crash recorded as XFAIL), the
 vendor Vulkan ICD (`vulkaninfo`, compute submit, presentation), the vendor
 OpenCL driver and its forwarding shim, hardware H.264/HEVC/MPEG-4/H.263
 encoding, hardware decoding of all five supported codecs plus I420 output, and
@@ -67,7 +69,7 @@ through `omx-dec`, and requires exactly `3 * 115200` bytes of NV12 (or I420).
 VP9 is fed the committed IVF fixture in `encoders/testdata/` because the device
 has no VP9 encoder.
 
-With `FULL=1` the current matrix is **29/29 PASS, 0 FAIL, 0 XFAIL**.
+With `FULL=1` the current matrix is **30/30 PASS, 0 FAIL, 1 XFAIL**.
 Checks that are tracked as known limitations report `XFAIL` and do not fail the
 run. Logs are written under `/tmp/opencode/`, never into the repository.
 
@@ -125,9 +127,11 @@ accidentally selecting the vendor ICD or preloading the bridge layer.
    offscreen clear, synchronization, and readback before testing WSI.
 4. **X11 WSI:** diagnose Mesa `vkcube` after queue submission works; test
    Termux:X11 separately from KeX/Xtigervnc.
-5. **OpenGL:** Zink is gated out on the vendor ICD (missing
-   `VK_EXT_robustness2.nullDescriptor`) and on Mesa `pvr` (device
-   initialisation fails against `pvrsrvkm`); see
+5. **OpenGL:** Zink starts on the vendor ICD (Phase 2 added the
+   `VK_EXT_robustness2` shim and an empty-submit workaround) but is capped at
+   GL 2.1 because the vendor Vulkan driver has no `VK_EXT_transform_feedback`,
+   and it crashes on the first draw; Mesa `pvr` still fails device
+   initialisation against `pvrsrvkm`. See
    [opengl/zink-gate.md](opengl/zink-gate.md). Desktop GL 2.1 is delivered by
    GL4ES on vendor GLES instead.
 6. **Build reproducibility:** automate target-ABI usclib generation, rebuild
@@ -223,10 +227,11 @@ is `/tmp/opencode/phone-vendor-vkmark-full.log` and is not part of the repo.
 - No Mesa `vkmark` benchmark can be claimed until submission and WSI work.
 - Kali's desktop has not been validated as GPU-rendered. The visible cube and
   benchmark use the separate vendor HAL, not Mesa.
-- OpenGL/Zink is gated out on both paths: Zink rejects the vendor ICD for
-  lacking `VK_EXT_robustness2.nullDescriptor`, and Mesa `pvr` fails device
-  enumeration against the proprietary `pvrsrvkm` module. Desktop GL 2.1 is
-  provided by GL4ES on vendor GLES; see
+- OpenGL/Zink is gated out on both paths. Zink now creates a screen on the
+  vendor ICD, but the driver exposes no `VK_EXT_transform_feedback`, which GL
+  3.0 and GLES 3.0 require, so the screen caps at GL 2.1; it also segfaults on
+  the first draw. Mesa `pvr` fails device enumeration against the proprietary
+  `pvrsrvkm` module. Desktop GL 2.1 is provided by GL4ES on vendor GLES; see
   [opengl/zink-gate.md](opengl/zink-gate.md). Do not infer Mesa OpenGL
   acceleration from Vulkan device enumeration or vendor results.
 - Mainline Mesa `pvr` expects the `drm/imagination` kernel UAPI; this phone
@@ -243,10 +248,11 @@ is `/tmp/opencode/phone-vendor-vkmark-full.log` and is not part of the repo.
 2. Fix and verify Mesa offscreen submit, clear, synchronization, and readback.
 3. Diagnose the Mesa swapchain ioctl only after rendering works; then retry
    Mesa `vkcube` and a Mesa `vkmark` run.
-4. Re-open the Zink gate only if a newer vendor DDK exposes
-   `VK_EXT_robustness2` with `nullDescriptor`, or if `drm/imagination` becomes
-   available and Mesa `pvr` passes queue submission; then check the renderer
-   string for the PowerVR GPU rather than `llvmpipe`/`softpipe`.
+4. Zink needs more than a newer DDK: GL 3.0 requires transform feedback, so
+   either a vendor DDK exposing `VK_EXT_transform_feedback` (and a fix for the
+   first-draw crash) or a Zink/Mesa stream-output emulation is required. The
+   alternative remains `drm/imagination` plus a working Mesa `pvr`; then check
+   the renderer string for the PowerVR GPU rather than `llvmpipe`/`softpipe`.
 5. Only after those pass, test a lightweight desktop with compositing disabled
    first. Keep the working vendor ICD as fallback and do not replace global
    Vulkan/OpenGL libraries during bring-up.

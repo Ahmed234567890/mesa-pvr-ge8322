@@ -68,7 +68,7 @@ published here.
 | `glmark2 --benchmark build` (GLX) through `desktop/bin/gpu-env` | **Pass**; GE8322 renderer, ~74 at 480x320, exit 0 | Mesa llvmpipe scores ~43 on `build` and ~25 on `shading` under the same conditions, so the GL4ES path is ~1.7-3x faster and uses the GPU |
 | Vendor `glmark2-es2-x11` with no `LD_PRELOAD` | **Pass**; GE8322, score 212 | The ctype repair inside `libEGL` is sufficient; no preload is needed for a whole session |
 | Kali `glmark2-es2 --off-screen --validate` (default Mesa EGL) | Most validation cases pass; reports Mesa `llvmpipe` | Software GLES only; not GE8322 acceleration |
-| Mesa `pvr` OpenGL/Zink | Tested and gated out | Mesa `pvr` cannot enumerate a device (`VK_ERROR_INITIALIZATION_FAILED`, expects `drm/imagination`), and Zink rejects the vendor ICD for lacking `VK_EXT_robustness2.nullDescriptor`; see [zink-gate.md](zink-gate.md) |
+| Mesa `pvr` OpenGL/Zink | Tested and gated out (re-checked in Phase 2) | Mesa `pvr` cannot enumerate a device (`VK_ERROR_INITIALIZATION_FAILED`, expects `drm/imagination`). Zink now *starts* through the `libsysvk` robustness2 shim and the empty-command-buffer submit fix, but caps at GL 2.1 because the vendor Vulkan driver has no `VK_EXT_transform_feedback` (required by GL 3.0 and GLES 3.0), and it segfaults on the first draw (`glxgears`, `glmark2`); see [zink-gate.md](zink-gate.md) |
 | Kali desktop acceleration | Not tested / not working evidence | XFCE runs on Termux:X11, but draws through X11/CPU; no compositor or desktop app has been verified on the vendor GLES path |
 
 The X11 probe crash had two independent causes, both now fixed.
@@ -231,12 +231,16 @@ Then copy `hybris/egl/.libs/libEGL.so.1.0.0` to
 
 ## Desktop OpenGL through GL4ES
 
-Mesa is not usable as the desktop GL path on this phone. Zink rejects the
-vendor ICD because it does not expose the `nullDescriptor` feature of
-`VK_EXT_robustness2`, which Mesa treats as a hard requirement, and Mesa's own
-`pvr` ICD cannot initialise against the `pvrsrvkm` kernel module. Extension
-coverage is otherwise broad, so this is a feature gap rather than a "Vulkan 1.1
-driver" problem; [zink-gate.md](zink-gate.md) records the full evidence.
+Mesa is not usable as the desktop GL path on this phone. Phase 2 removed the
+original blocker — `libsysvk` now supplies the `VK_EXT_robustness2.nullDescriptor`
+feature Zink requires and works around a vendor `vkQueueSubmit` crash on
+semaphore-only submits — so Zink starts and reports a GE8322 renderer. It is
+still gated out for two reasons: the vendor Vulkan driver has no
+`VK_EXT_transform_feedback`, which Mesa requires for both GL 3.0 and GLES 3.0,
+so the screen caps at GL 2.1 (the ceiling GL4ES already provides); and the
+vendor driver segfaults on the first draw Zink emits. Mesa's own `pvr` ICD
+cannot initialise against the `pvrsrvkm` kernel module either.
+[zink-gate.md](zink-gate.md) records the full evidence and the routes to GL 3.x.
 Desktop OpenGL is therefore provided by GL4ES translating GL 2.1 to vendor
 GLES. `opengl/build-gl4es.sh` pins the verified upstream commit, applies the
 hybris EGL-platform patch, generates the armhf toolchain file and builds with

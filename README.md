@@ -36,9 +36,13 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > H.264/HEVC/H.263/VP9 decode is bit-exact against FFmpeg; MPEG-4 matches luma
 > exactly and chroma within ±1. See
 > [encoders/README.md](encoders/README.md). Mesa GLX still reports llvmpipe,
-> and OpenGL 3.x/4.x is not available on this hardware: Zink rejects the
-> vendor ICD for lacking `VK_EXT_robustness2.nullDescriptor`, and Mesa `pvr`
-> cannot initialise against `pvrsrvkm`. See
+> and OpenGL 3.x/4.x is not available on this hardware. Phase 2 removed the
+> original Zink blocker (`libsysvk` now supplies
+> `VK_EXT_robustness2.nullDescriptor` and works around a vendor `vkQueueSubmit`
+> crash on semaphore-only submits), so Zink starts — but the vendor Vulkan
+> driver has no `VK_EXT_transform_feedback`, which GL 3.0 and GLES 3.0 require,
+> so the screen caps at GL 2.1, and the vendor driver segfaults on Zink's first
+> draw. Mesa `pvr` still cannot initialise against `pvrsrvkm`. See
 > [opengl/zink-gate.md](opengl/zink-gate.md).
 
 ## Start here

@@ -61,7 +61,7 @@ enable an explicit layer by name.
 
 | Path | Purpose |
 | --- | --- |
-| `src/sysvk/` | ICD shim that opens the vendor `vulkan` HAL through `hw_get_module()` |
+| `src/sysvk/` | ICD shim that opens the vendor `vulkan` HAL through `hw_get_module()`, advertises the `VK_EXT_robustness2` feature Zink needs, and repairs vendor submit behaviour |
 | `src/ahb-wrapper/` | `AHardwareBuffer_*` entry points for the WSI layer, resolved through libhybris |
 | `src/pvr-smoke.c` | display-independent device, clear, and readback test |
 | `src/pvr-mount-private.c` | static `MS_PRIVATE\|MS_REC` helper for chroot bind mounts |
@@ -181,6 +181,27 @@ cmake -S /path/to/mesa-pvr-ge8322/bridge/src/sysvk -B "$BUILD/build-sysvk" \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build "$BUILD/build-sysvk" -j"$(nproc)"
 ```
+
+`libsysvk` also carries two compatibility shims added in Phase 2:
+
+- **`VK_EXT_robustness2`.** DDK 1.18 has no robustness2 and Zink refuses to
+  create a screen without `nullDescriptor`. With `SYSVK_ENABLE_RB2=1` the shim
+  appends the extension to `vkEnumerateDeviceExtensionProperties`, reports
+  `nullDescriptor = 1` through `vkGetPhysicalDeviceFeatures2`, and strips the
+  name in `vkCreateDevice` because the vendor would reject it. The feature is
+  advertised, not translated — see [../opengl/zink-gate.md](../opengl/zink-gate.md).
+  It is **opt-in on purpose**: without the variable the vendor extension list
+  is passed through untouched, so clients such as DXVK or vkd3d never see a
+  capability the vendor cannot provide.
+- **Empty submits.** The vendor `vkQueueSubmit` dereferences the first command
+  buffer of every `VkSubmitInfo`, so a submit with `commandBufferCount == 0`
+  (legal Vulkan, and what Zink uses to signal a timeline semaphore) crashes it
+  at `vulkan.sp9863a.so+0x4f6f8`. The shim substitutes a recorded empty command
+  buffer from a per-queue-family pool, which keeps the semaphore and fence
+  semantics instead of dropping them.
+
+Set `SYSVK_DEBUG=1` to dump the vendor entry-point table and submit summaries,
+and `SYSVK_ENABLE_RB2=1` to advertise `VK_EXT_robustness2` (Zink only).
 
 ### 4. AHardwareBuffer shim
 
