@@ -119,6 +119,69 @@ than `pkill -f`, which also matches the command line of the shell running it:
 pkill -x xfce4-session
 ```
 
+## Restarting a wedged Termux:X11 server
+
+The Termux:X11 server can wedge: new clients connect to `/tmp/.X11-unix/X1` but
+never get a reply, so `xdpyinfo` hangs and every X11 check fails while offscreen
+EGL and Vulkan compute still pass. The server process stays alive and idle
+rather than crashing, so "is it running" checks are not enough — test with
+`xdpyinfo` under a timeout.
+
+This was observed once, after a long series of `glmark2` runs; treat repeated
+GL benchmark loops against Termux:X11 as a possible trigger rather than a
+proven cause.
+
+`am force-stop com.termux.x11` does **not** stop it, because the server runs in
+the Magisk/root context and is not owned by the app. Kill the server PID, then
+start it again as the app's uid:
+
+```sh
+# 1. find and stop the old server
+adb shell su -c 'ps -A -o PID,NAME | grep "termux-x11 com.termux.x11"'
+adb shell su -c 'kill -9 <pid>'
+
+# 2. restart it (TMPDIR is required, see below)
+adb push desktop/start-termux-x11.sh /data/local/tmp/
+adb shell su -c 'chmod 755 /data/local/tmp/start-termux-x11.sh'
+adb shell su -c 'setsid su u0_a226 -c "sh /data/local/tmp/start-termux-x11.sh" \
+  >/dev/null 2>&1 &'
+
+# 3. verify, then restart XFCE
+adb shell su -c 'ls -l /data/local/nhsystem/kali-armhf/tmp/.X11-unix/'
+adb shell su -c 'chroot /data/local/nhsystem/kali-armhf /usr/bin/env -i \
+  HOME=/root PATH=/usr/bin:/bin DISPLAY=:1 xdpyinfo | head -3'
+```
+
+The launcher (`desktop/start-termux-x11.sh`) is just the Termux:X11 loader with
+the app's environment:
+
+```sh
+PREFIX=/data/data/com.termux/files/usr
+export TMPDIR=$PREFIX/tmp
+export CLASSPATH=$PREFIX/libexec/termux-x11/loader.apk
+unset LD_LIBRARY_PATH LD_PRELOAD
+cd /
+exec /system/bin/app_process -Xnoimage-dex2oat / \
+    --nice-name="termux-x11 com.termux.x11 :1 -ac" \
+    com.termux.x11.Loader :1 -ac
+```
+
+`TMPDIR` is the trap. Without it the server logs
+`LorieNative: Using TMPDIR="/tmp"`, cannot create its lock file as `u0_a226`,
+and exits with `Server stopped (1)` — no socket, no error on the console.
+
+After the server is back, the old XFCE session is dead (its clients are zombies
+or gone), so kill any survivors by exact name and start `start-xfce` again:
+
+```sh
+for p in xfce4-session xfwm4 xfdesktop xfsettingsd xfce4-panel xfconfd; do
+    pkill -x "$p"
+done
+setsid chroot $CH /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin DISPLAY=:1 \
+    /opt/pvr-bridge/desktop/bin/start-xfce \
+    >/data/local/tmp/xfce-restart.log 2>&1 &
+```
+
 ## Moving Prism when its title bar is obscured
 
 The XFCE top panel initially overlapped Prism's title bar, making the window

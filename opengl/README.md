@@ -65,7 +65,7 @@ published here.
 | Same timed scene with `--frame-end none` / `finish` / `readpixels` | Emits scene results, then segfaults at shutdown | Useful diagnostics, not comparable benchmark scores |
 | Kali `glmark2 --validate` (GLX) | Most validation cases pass; reports Mesa `llvmpipe` | Software rendering only; not GE8322 acceleration |
 | `glx-probe` GLX window through `desktop/bin/gpu-env` | **Pass**; `GL_RENDERER = GL4ES using PowerVR Rogue GE8322`, `GL_VERSION = 2.1 gl4es wrapper 1.1.7`, readback `64 128 191 255`, exit 0 | Desktop OpenGL 2.1 is now hardware-backed through GL4ES on the vendor GLES driver |
-| `glmark2 --benchmark build` (GLX) through `desktop/bin/gpu-env` | **Pass**; GE8322 renderer, score 139 at 480x320, exit 0 | Same scene on Mesa llvmpipe scores 39, so the GL4ES path is ~3.6x faster and uses the GPU |
+| `glmark2 --benchmark build` (GLX) through `desktop/bin/gpu-env` | **Pass**; GE8322 renderer, ~74 at 480x320, exit 0 | Mesa llvmpipe scores ~43 on `build` and ~25 on `shading` under the same conditions, so the GL4ES path is ~1.7-3x faster and uses the GPU |
 | Vendor `glmark2-es2-x11` with no `LD_PRELOAD` | **Pass**; GE8322, score 212 | The ctype repair inside `libEGL` is sufficient; no preload is needed for a whole session |
 | Kali `glmark2-es2 --off-screen --validate` (default Mesa EGL) | Most validation cases pass; reports Mesa `llvmpipe` | Software GLES only; not GE8322 acceleration |
 | Mesa `pvr` OpenGL/Zink | Tested and gated out | Mesa `pvr` cannot enumerate a device (`VK_ERROR_INITIALIZATION_FAILED`, expects `drm/imagination`), and Zink rejects the vendor ICD for lacking `VK_EXT_robustness2.nullDescriptor`; see [zink-gate.md](zink-gate.md) |
@@ -280,9 +280,28 @@ glx-probe: center pixel  = 64 128 191 255
 glx-probe: PASS
 ```
 
-Measured on this device at 480x320, `glmark2 --benchmark build` scores 139
-through GL4ES and 39 on Mesa llvmpipe. `scripts/verify-all.sh` reports
-`PASS desktop-gl-gl4es` with the renderer string as evidence.
+Measured on this device at 480x320 with `--swap-mode=immediate` (three runs
+each, GPU at its lowest 256 MHz OPP):
+
+| Renderer | `build` | `shading` |
+| --- | --- | --- |
+| GL4ES on GE8322 | ~74 | ~74 |
+| Mesa llvmpipe | ~43 | ~25 |
+
+So GL4ES is roughly 1.7x on `build` and 3x on `shading`. The renderer string,
+not the score, is what `scripts/verify-all.sh` checks (`PASS desktop-gl-gl4es`).
+
+Scores vary widely with desktop load and GPU DVFS state: the harness's short
+`build:duration=2` run has produced anything from 64 to 362 across sessions, so
+treat a single number as indicative only. Two measurements bound the behaviour:
+
+* Pinning the GPU at its top OPP (`min_freq=550000000` on
+  `/sys/class/devfreq/60000000.gpu`) does not change the score (~73 either way),
+  so this path is not GPU-clock-bound. The OPPs are 256/384/550 MHz under
+  `simple_ondemand`; the governor node itself is not writable at runtime.
+* Raising the CPU from its 768 MHz minimum to 1.2 GHz (`performance` governor)
+  moves `build` to ~80-110, so part of the cost is GL4ES's CPU-side translation
+  plus the Termux:X11 presentation copy, not the GPU.
 
 `desktop/gpu-env.sh` is the single place that sets the whole stack
 (`LD_LIBRARY_PATH` with GL4ES, EGL/GLES and the OpenCL shim, `LIBGL_EGL`,

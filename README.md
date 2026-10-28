@@ -17,20 +17,25 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > Termux:X11. A full vendor-driver `vkmark` run also completed at 60 FPS per
 > scene (FIFO/vsync-capped). These results do not establish Mesa rendering or
 > accelerated Kali desktop/OpenGL support. Do not confuse them with Mesa ICD
-> results. Preliminary vendor GLES via libhybris can render/read back an
-> offscreen pbuffer. A custom X11 window probe segfaults. `glmark2-es2-x11`
-> identifies the GE8322; with MIT-SHM disabled, moving and textured scenes are
-> visible on Termux:X11, and one-shot runs now exit cleanly after the
-> `eglTerminate` ordering fix. Desktop OpenGL 2.1 is available through GL4ES on
-> the vendor GLES driver (`GL4ES using PowerVR Rogue GE8322`, `glmark2` score
-> 139 versus 39 on llvmpipe), and the XFCE session exports that environment to
-> every child. The vendor OpenCL driver also works through libhybris: it reports
-> OpenCL 3.0 (OpenCL C 1.2) with 1 compute unit, runs real kernels, and a
-> generated `libOpenCL.so.1` shim lets ordinary `-lOpenCL` applications reach
-> the GPU. Mesa GLX still reports llvmpipe, and OpenGL 3.x/4.x is not
-> available on this hardware: Zink rejects the vendor ICD for lacking
-> `VK_EXT_robustness2.nullDescriptor`, and Mesa `pvr` cannot initialise against
-> `pvrsrvkm`. See [opengl/zink-gate.md](opengl/zink-gate.md).
+> results. Vendor GLES via libhybris renders and reads back an offscreen
+> pbuffer, and the X11 window path works: `glmark2-es2-x11` identifies the
+> GE8322, moving and textured scenes are visible on Termux:X11 (MIT-SHM
+> disabled), and one-shot runs exit cleanly after the `eglTerminate` ordering
+> fix. Desktop OpenGL 2.1 is available through GL4ES on the vendor GLES driver
+> (`GL4ES using PowerVR Rogue GE8322`, roughly 1.7x llvmpipe on `glmark2 build`
+> and 3x on `shading` at 480x320), and the XFCE session exports that
+> environment to every child. The vendor OpenCL driver also works through
+> libhybris: it reports OpenCL 3.0 (OpenCL C 1.2) with 1 compute unit, runs real
+> kernels, and a generated `libOpenCL.so.1` shim lets ordinary `-lOpenCL`
+> applications reach the GPU. The SPRD video block also runs in hardware
+> through the same libhybris stack: H.264/HEVC encode, and H.264/HEVC/MPEG-4/H.263/VP9 decode.
+> H.264/HEVC/H.263/VP9 decode is bit-exact against FFmpeg; MPEG-4 matches luma
+> exactly and chroma within ±1. See
+> [encoders/README.md](encoders/README.md). Mesa GLX still reports llvmpipe,
+> and OpenGL 3.x/4.x is not available on this hardware: Zink rejects the
+> vendor ICD for lacking `VK_EXT_robustness2.nullDescriptor`, and Mesa `pvr`
+> cannot initialise against `pvrsrvkm`. See
+> [opengl/zink-gate.md](opengl/zink-gate.md).
 
 ## Start here
 

@@ -51,7 +51,13 @@ else
 fi
 
 if ps -A -o NAME | grep -q '^termux-x11'; then
-    pass "x11-server"
+    # The process can stay alive but stop answering, so also require the
+    # socket.  x11-xdpyinfo below is the real liveness test.
+    if [ -S "$CH/tmp/.X11-unix/X1" ]; then
+        pass "x11-server"
+    else
+        fail "x11-server (termux-x11 running, no X1 socket)"
+    fi
 else
     fail "x11-server (termux-x11 not running)"
 fi
