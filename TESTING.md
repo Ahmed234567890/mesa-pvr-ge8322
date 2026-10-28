@@ -53,18 +53,21 @@ When `ADB_SERIAL` is unset the driver uses the only device `adb devices`
 reports as online, which avoids the wireless port rotating between sessions.
 
 The matrix covers: chroot and Android bind mounts, the X server and a client
-handshake, the vendor GLES pbuffer and X11 probes, the desktop OpenGL baseline
-renderer, the GL4ES desktop path on the vendor GPU, the vendor Vulkan ICD
-(`vulkaninfo`, compute submit, presentation), the vendor OpenCL driver and its
-forwarding shim, hardware H.264/HEVC/MPEG-4/H.263 encoding, hardware decoding
-of all five supported codecs plus I420 output, and the XFCE session.
+handshake, the vendor GLES pbuffer and X11 probes, the EGL platform probe
+(`EGL_EXT_platform_base` / `EGL_EXT_platform_x11` advertisement plus
+`eglGetPlatformDisplayEXT` and `eglCreatePlatformWindowSurfaceEXT`), the
+desktop OpenGL baseline renderer, the GL4ES desktop path on the vendor GPU, the
+vendor Vulkan ICD (`vulkaninfo`, compute submit, presentation), the vendor
+OpenCL driver and its forwarding shim, hardware H.264/HEVC/MPEG-4/H.263
+encoding, hardware decoding of all five supported codecs plus I420 output, and
+the XFCE session.
 
 Each decode check encodes three flat 320x240 frames on the device, decodes them
 through `omx-dec`, and requires exactly `3 * 115200` bytes of NV12 (or I420).
 VP9 is fed the committed IVF fixture in `encoders/testdata/` because the device
 has no VP9 encoder.
 
-With `FULL=1` the current matrix is **28/28 PASS, 0 FAIL, 0 XFAIL**.
+With `FULL=1` the current matrix is **29/29 PASS, 0 FAIL, 0 XFAIL**.
 Checks that are tracked as known limitations report `XFAIL` and do not fail the
 run. Logs are written under `/tmp/opencode/`, never into the repository.
 

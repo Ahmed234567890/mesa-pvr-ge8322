@@ -28,6 +28,10 @@ LINK_FLAGS="-L$EGL_DIR -L$GLES_DIR -L$SYSROOT_LIB -Wl,-rpath-link,$SYSROOT_LIB -
     "$REPO_ROOT/opengl/egl-gles2-x11-smoke.c" $LINK_FLAGS -lX11 -lxcb
 
 # shellcheck disable=SC2086
+"$CC" $COMMON_FLAGS -o "$OUT_DIR/egl-platform-smoke" \
+    "$REPO_ROOT/opengl/egl-platform-smoke.c" $LINK_FLAGS -lX11 -lxcb
+
+# shellcheck disable=SC2086
 "$CC" $COMMON_FLAGS -o "$OUT_DIR/egl-loader-smoke" \
     "$REPO_ROOT/opengl/egl-loader-smoke.c" -ldl
 
@@ -37,4 +41,5 @@ LINK_FLAGS="-L$EGL_DIR -L$GLES_DIR -L$SYSROOT_LIB -Wl,-rpath-link,$SYSROOT_LIB -
     "$REPO_ROOT/opengl/hybris-ctype-fix.c" -ldl
 
 file "$OUT_DIR/egl-gles2-smoke" "$OUT_DIR/egl-gles2-x11-smoke" \
-     "$OUT_DIR/egl-loader-smoke" "$OUT_DIR/libhybris-ctype-fix.so"
+     "$OUT_DIR/egl-platform-smoke" "$OUT_DIR/egl-loader-smoke" \
+     "$OUT_DIR/libhybris-ctype-fix.so"

@@ -1,0 +1,219 @@
+--- a/hybris/egl/egl.c
++++ b/hybris/egl/egl.c
+@@ -394,6 +394,37 @@
+ 	return ws_eglQueryString(hybris_egl_get_real_display(dpy), name, _eglQueryString);
+ }
+ 
++/*
++ * EGL_EXT_device_query entry points.
++ *
++ * libhybris has no EGLDeviceEXT objects: the vendor stack is bound to the
++ * Android display and this device exposes no DRM device at all. Applications
++ * still resolve these two symbols unconditionally before they try EGL (Firefox
++ * glxtest does, and calls eglQueryDisplayAttribEXT() without a NULL check), so
++ * provide the entry points and fail cleanly instead of leaving them unresolved.
++ *
++ * Neither function is advertised in the extension strings; a caller that gets
++ * EGL_FALSE here is expected to fall back to its non-EGLDeviceEXT path.
++ */
++EGLBoolean eglQueryDisplayAttribEXT(EGLDisplay dpy, EGLint name, EGLAttrib *value)
++{
++	(void) dpy;
++	(void) name;
++	(void) value;
++
++	__eglHybrisSetError(EGL_BAD_PARAMETER);
++	return EGL_FALSE;
++}
++
++const char * eglQueryDeviceStringEXT(EGLDeviceEXT device, EGLint name)
++{
++	(void) device;
++	(void) name;
++
++	__eglHybrisSetError(EGL_BAD_PARAMETER);
++	return NULL;
++}
++
+ HYBRIS_EGL_IMPLEMENT_FUNCTION4(egl, EGLBoolean, eglGetConfigs, EGLDisplay, EGLConfig *, EGLint, EGLint *);
+ HYBRIS_EGL_IMPLEMENT_FUNCTION5(egl, EGLBoolean, eglChooseConfig, EGLDisplay, const EGLint *, EGLConfig *, EGLint, EGLint *);
+ 
+@@ -666,6 +697,8 @@
+ 	OVERRIDE_SAMENAME(eglQueryContext),
+ 	OVERRIDE_SAMENAME(eglCopyBuffers),
+ 	OVERRIDE_SAMENAME(eglQueryString),
++	OVERRIDE_SAMENAME(eglQueryDisplayAttribEXT),
++	OVERRIDE_SAMENAME(eglQueryDeviceStringEXT),
+ 	OVERRIDE_SAMENAME(eglSetDamageRegionKHR),
+ 	/*
+ 	 * EGL_EXT_platform_base, in case Android EGL or glvnd advertise its
+--- a/hybris/egl/ws.c
++++ b/hybris/egl/ws.c
+@@ -23,6 +23,7 @@
+ #include <sys/auxv.h>
+ #include <pthread.h>
+ #include <string.h>
++#include <unistd.h>
+ 
+ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+ 
+@@ -30,6 +31,142 @@
+ static void* wsmod = NULL;
+ static char ws_name[32] = { 0 };
+ 
++/*
++ * EGL_EXT_platform_base is implemented in egl.c (eglGetPlatformDisplay,
++ * eglCreatePlatformWindowSurface, ...), but the vendor client extension
++ * string is passed through verbatim, so applications that check
++ * eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS) before touching a display
++ * never see it and fall back to eglGetDisplay(). Merge the extensions we
++ * actually implement into that string.
++ *
++ * EGL_EXT_platform_x11 is only advertised when the X11 platform module is
++ * installed, because eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, ...) would
++ * abort in ws_init() otherwise.
++ */
++static const char *ws_platform_dir(void)
++{
++	const char *user_eglplatform_dir = getauxval(AT_SECURE)
++					   ? NULL
++					   : getenv("HYBRIS_EGLPLATFORM_DIR");
++
++	return user_eglplatform_dir ? user_eglplatform_dir : PKGLIBDIR;
++}
++
++static int ws_platform_available(const char *platform)
++{
++	char ws_lib_path[2048];
++	const char *eglplatform_dir = ws_platform_dir();
++
++	snprintf(ws_lib_path, sizeof(ws_lib_path), "%s/eglplatform_%s.so",
++		 eglplatform_dir, platform);
++
++	return access(ws_lib_path, R_OK) == 0;
++}
++
++/* Match a whole extension name, not a substring of a longer one. */
++static int ws_has_extension(const char *extensions, const char *extension)
++{
++	size_t len = strlen(extension);
++	const char *p = extensions;
++
++	while (p != NULL && (p = strstr(p, extension)) != NULL) {
++		int starts_token = (p == extensions) || (p[-1] == ' ');
++		int ends_token = (p[len] == '\0') || (p[len] == ' ');
++
++		if (starts_token && ends_token)
++			return 1;
++		p += len;
++	}
++	return 0;
++}
++
++/*
++ * Returns the extensions this wrapper adds on top of the vendor client
++ * extensions, including the leading space needed to append them. The result
++ * only depends on the installed platform modules, so it is built once.
++ */
++static const char *ws_platform_client_extensions(void)
++{
++	static char additions[128];
++	static int built = 0;
++	static pthread_mutex_t additions_mutex = PTHREAD_MUTEX_INITIALIZER;
++
++	pthread_mutex_lock(&additions_mutex);
++	if (!built) {
++		size_t used = 0;
++
++		additions[0] = '\0';
++
++		snprintf(additions + used, sizeof(additions) - used,
++			 " EGL_EXT_platform_base");
++		used = strlen(additions);
++
++		if (ws_platform_available("x11")) {
++			snprintf(additions + used, sizeof(additions) - used,
++				 " EGL_EXT_platform_x11 EGL_KHR_platform_x11");
++		}
++
++		built = 1;
++	}
++	pthread_mutex_unlock(&additions_mutex);
++
++	return additions;
++}
++
++static const char *ws_client_extensions(const char *vendor_extensions)
++{
++	static char merged[2048];
++	static int built = 0;
++	static pthread_mutex_t merged_mutex = PTHREAD_MUTEX_INITIALIZER;
++	const char *additions;
++	const char *token;
++
++	if (vendor_extensions == NULL)
++		return ws_platform_client_extensions();
++
++	additions = ws_platform_client_extensions();
++
++	pthread_mutex_lock(&merged_mutex);
++	if (!built) {
++		snprintf(merged, sizeof(merged), "%s", vendor_extensions);
++
++		/* additions is " EGL_A EGL_B ..."; append what is missing. */
++		token = additions;
++		while (*token != '\0') {
++			char name[64];
++			const char *end;
++			size_t len;
++
++			while (*token == ' ')
++				token++;
++			if (*token == '\0')
++				break;
++
++			end = strchr(token, ' ');
++			len = end ? (size_t)(end - token) : strlen(token);
++			if (len >= sizeof(name))
++				len = sizeof(name) - 1;
++			memcpy(name, token, len);
++			name[len] = '\0';
++
++			if (!ws_has_extension(vendor_extensions, name)) {
++				size_t used = strlen(merged);
++
++				if (used + len + 2 < sizeof(merged))
++					snprintf(merged + used, sizeof(merged) - used,
++						 " %s", name);
++			}
++
++			token += len;
++		}
++
++		built = 1;
++	}
++	pthread_mutex_unlock(&merged_mutex);
++
++	return merged;
++}
++
+ static EGLBoolean ensureCorrectWs(const char * egl_platform)
+ {
+ 	return strcmp(egl_platform, ws_name) == 0;
+@@ -137,9 +274,14 @@
+ 
+ const char *ws_eglQueryString(EGLDisplay dpy, EGLint name, const char *(*real_eglQueryString)(EGLDisplay dpy, EGLint name))
+ {
+-	if (dpy == EGL_NO_DISPLAY)
++	if (dpy == EGL_NO_DISPLAY) {
++		const char *extensions = real_eglQueryString(dpy, name);
++
+ 		// Querying client strings doesn't depend on having a ws.
+-		return real_eglQueryString(dpy, name);
++		if (name == EGL_EXTENSIONS)
++			return ws_client_extensions(extensions);
++		return extensions;
++	}
+ 
+ 	assert(ws != NULL);
+ 	return ws->eglQueryString(dpy, name, real_eglQueryString);
