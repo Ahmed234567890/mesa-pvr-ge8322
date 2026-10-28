@@ -62,6 +62,16 @@ ANDROID_ROOT=${ANDROID_ROOT:-/system}
 ANDROID_DATA=${ANDROID_DATA:-/data}
 export ANDROID_ROOT ANDROID_DATA
 
+# Vulkan: the vendor HAL through the sysvk ICD plus the X11 WSI layer. The
+# layer resolves libahb-wrapper itself, so no LD_PRELOAD is needed here either.
+VK_ICD_FILENAMES=${VK_ICD_FILENAMES:-$GPU_BRIDGE/share/vulkan/icd.d/sysvk_icd.json}
+VK_ADD_IMPLICIT_LAYER_PATH=${VK_ADD_IMPLICIT_LAYER_PATH:-$GPU_BRIDGE/share/vulkan/implicit_layer.d}
+# Mesa's device-select and anti-lag layers can intercept vendor device
+# selection and presentation.
+VK_LOADER_LAYERS_DISABLE=${VK_LOADER_LAYERS_DISABLE:-VK_LAYER_MESA_device_select,VK_LAYER_MESA_anti_lag}
+unset VK_INSTANCE_LAYERS VK_LAYER_PATH 2>/dev/null || true
+export VK_ICD_FILENAMES VK_ADD_IMPLICIT_LAYER_PATH VK_LOADER_LAYERS_DISABLE
+
 # Run a command through the environment when arguments are given. When the
 # file is sourced, "$#" is the sourcing shell's argument count, so an
 # interactive shell without arguments just gets the variables.

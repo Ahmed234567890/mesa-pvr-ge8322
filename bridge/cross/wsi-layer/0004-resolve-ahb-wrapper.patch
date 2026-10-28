@@ -1,0 +1,44 @@
+diff --git a/wsi/x11/swapchain.cpp b/wsi/x11/swapchain.cpp
+--- a/wsi/x11/swapchain.cpp
++++ b/wsi/x11/swapchain.cpp
+@@ -559,6 +559,40 @@
+       reinterpret_cast<pfnAHardwareBuffer_release>(dlsym(RTLD_DEFAULT, "AHardwareBuffer_release"));
+    HardwareBuffer_sendHandleToUnixSocket = reinterpret_cast<pfnAHardwareBuffer_sendHandleToUnixSocket>(
+       dlsym(RTLD_DEFAULT, "AHardwareBuffer_sendHandleToUnixSocket"));
++
++   /*
++    * The vendor path needs libhybris' AHardwareBuffer wrapper. Resolve the
++    * symbols from the wrapper library itself instead of requiring the
++    * application (or a session-wide LD_PRELOAD) to put them in the global
++    * scope. The handle is intentionally kept open for the life of the layer.
++    */
++   if (HardwareBuffer_release == nullptr || HardwareBuffer_sendHandleToUnixSocket == nullptr)
++   {
++      static void *ahb_wrapper;
++      if (ahb_wrapper == nullptr)
++      {
++         ahb_wrapper = dlopen("libahb-wrapper.so.1", RTLD_NOW | RTLD_LOCAL);
++         if (ahb_wrapper == nullptr)
++         {
++            ahb_wrapper = dlopen("libahb-wrapper.so", RTLD_NOW | RTLD_LOCAL);
++         }
++      }
++      if (ahb_wrapper != nullptr)
++      {
++         if (HardwareBuffer_release == nullptr)
++         {
++            HardwareBuffer_release = reinterpret_cast<pfnAHardwareBuffer_release>(
++               dlsym(ahb_wrapper, "AHardwareBuffer_release"));
++         }
++         if (HardwareBuffer_sendHandleToUnixSocket == nullptr)
++         {
++            HardwareBuffer_sendHandleToUnixSocket =
++               reinterpret_cast<pfnAHardwareBuffer_sendHandleToUnixSocket>(
++                  dlsym(ahb_wrapper, "AHardwareBuffer_sendHandleToUnixSocket"));
++         }
++      }
++   }
++
+    m_memory_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+    m_memory_props.pNext = nullptr;
+    m_device_data.instance_data.disp.GetPhysicalDeviceMemoryProperties2KHR(m_device_data.physical_device,

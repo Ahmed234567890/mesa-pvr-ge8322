@@ -28,6 +28,8 @@ readiness or Vulkan conformance.
 | Whole XFCE session with `desktop/bin/gpu-env` | n/a | Pass: every child inherits the vendor GPU environment; no preload |
 | OpenCL compute via vendor `libPVROCL.so` | Mesa rusticl only | Pass: PowerVR platform, GE8322 device, OpenCL 3.0 (OpenCL C 1.2), kernel result `11 22 33 44`, 3/3 runs |
 | OpenCL through the generated `libOpenCL.so.1` shim | n/a | Pass: an ordinary client that links `-lOpenCL` runs a kernel on the GE8322 |
+| Vulkan presentation through `desktop/bin/gpu-env` | n/a | Pass: `vkcube` selects GE8322 and exits 0 with no `LD_PRELOAD` |
+| Three consecutive `vkcube` runs through `gpu-env` | n/a | Pass: 3/3 exit 0, no teardown regression |
 
 `vulkaninfo --summary` reported API `1.2.363`, device `PowerVR Rogue GE8322`,
 and conformance version `1.4.3.3`. The latter is a driver-reported property,

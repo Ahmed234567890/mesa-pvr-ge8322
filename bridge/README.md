@@ -33,7 +33,11 @@ The WSI layer owns swapchains. It asks the vendor HAL for an Android hardware
 buffer (`vkGetMemoryAndroidHardwareBufferANDROID`), exports it as a dma-buf
 file descriptor, and hands it to X11 through DRI3/Present. The
 `AHardwareBuffer_*` entry points are resolved through libhybris from
-`libnativewindow.so` by the preloaded `libahb-wrapper.so`. The vendor HAL has
+`libnativewindow.so` by `libahb-wrapper.so`, which the layer loads itself
+(`0004-resolve-ahb-wrapper.patch`). A session-wide `LD_PRELOAD` is therefore
+not required, which matters because preloading a glibc library breaks Android
+binaries started from desktop terminals. `pvr-env` still preloads the wrapper
+for compatibility with older layer builds. The vendor HAL has
 no `VK_KHR_xcb_surface` or `VK_EXT_headless_surface`, so the layer synthesizes
 its own opaque `VkSurfaceKHR` handles and never calls the ICD's surface entry
 points.
@@ -140,6 +144,7 @@ git checkout d5624d42d8b2debbd910ad25662a05c751eb38b7
 git apply /path/to/mesa-pvr-ge8322/bridge/cross/wsi-layer/0001-build-cross-compile.patch
 git apply /path/to/mesa-pvr-ge8322/bridge/cross/wsi-layer/0002-layer-owned-surfaces.patch
 git apply /path/to/mesa-pvr-ge8322/bridge/cross/wsi-layer/0003-init-memory-properties.patch
+git apply /path/to/mesa-pvr-ge8322/bridge/cross/wsi-layer/0004-resolve-ahb-wrapper.patch
 
 cmake -S . -B "$BUILD/build-wsi" \
   -DCMAKE_TOOLCHAIN_FILE=/path/to/mesa-pvr-ge8322/bridge/cross/armhf-toolchain.cmake \
@@ -159,7 +164,10 @@ second makes X11 and headless surface creation layer-owned. The third
 initializes `VkPhysicalDeviceMemoryProperties2` before passing it to
 `vkGetPhysicalDeviceMemoryProperties2KHR`; the vendor HAL walks the struct's
 `pNext` unconditionally, so an uninitialized stack value crashes it even
-though Mesa ignores `pNext`.
+though Mesa ignores `pNext`. The fourth lets the layer load
+`libahb-wrapper.so` itself instead of depending on a session-wide
+`LD_PRELOAD`, so Vulkan presentation works from the global desktop
+environment.
 
 ### 3. sysvk
 
