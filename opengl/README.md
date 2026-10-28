@@ -64,6 +64,9 @@ published here.
 | Same timed scene, one-shot with SHM disabled | Emits FPS / score, then segfaults during process shutdown | Rendering and swap work; teardown still needs repair |
 | Same timed scene with `--frame-end none` / `finish` / `readpixels` | Emits scene results, then segfaults at shutdown | Useful diagnostics, not comparable benchmark scores |
 | Kali `glmark2 --validate` (GLX) | Most validation cases pass; reports Mesa `llvmpipe` | Software rendering only; not GE8322 acceleration |
+| `glx-probe` GLX window through `desktop/bin/gpu-env` | **Pass**; `GL_RENDERER = GL4ES using PowerVR Rogue GE8322`, `GL_VERSION = 2.1 gl4es wrapper 1.1.7`, readback `64 128 191 255`, exit 0 | Desktop OpenGL 2.1 is now hardware-backed through GL4ES on the vendor GLES driver |
+| `glmark2 --benchmark build` (GLX) through `desktop/bin/gpu-env` | **Pass**; GE8322 renderer, score 139 at 480x320, exit 0 | Same scene on Mesa llvmpipe scores 39, so the GL4ES path is ~3.6x faster and uses the GPU |
+| Vendor `glmark2-es2-x11` with no `LD_PRELOAD` | **Pass**; GE8322, score 212 | The ctype repair inside `libEGL` is sufficient; no preload is needed for a whole session |
 | Kali `glmark2-es2 --off-screen --validate` (default Mesa EGL) | Most validation cases pass; reports Mesa `llvmpipe` | Software GLES only; not GE8322 acceleration |
 | Mesa `pvr` OpenGL/Zink | Not tested | Mesa Vulkan submit and WSI failures remain; vendor GLES results do not imply Mesa support |
 | Kali desktop acceleration | Not tested / not working evidence | XFCE runs on Termux:X11, but draws through X11/CPU; no compositor or desktop app has been verified on the vendor GLES path |
@@ -81,8 +84,12 @@ end of its buffer and faulted at `libX11.so.6.4.0 + 0x39886`. The stripped
 library hid the function, and an earlier `_XimDecodeICATTRIBUTE` label was
 wrong because GDB was given the ELF load bias as the `.text` address.
 `setlocale()` does not repair the pointer because the locale is already `C` and
-the call is a no-op. `run-x11-gles` now preloads
-`libhybris-ctype-fix.so`, which interposes `__ctype_b_loc`,
+the call is a no-op. The staged `libEGL` now saves the glibc value around
+`android_dlopen()` of the vendor libraries and writes it back afterwards
+(`patches/libhybris-egl-ctype-restore.patch`), so no preload is required and
+Android binaries started from the desktop are unaffected.
+`run-x11-gles` still preloads `libhybris-ctype-fix.so` for unpatched
+`libEGL` builds; that helper interposes `__ctype_b_loc`,
 `__ctype_tolower_loc`, and `__ctype_toupper_loc` and reinstalls a valid
 C-locale table whenever the slot no longer validates.
 
@@ -155,18 +162,27 @@ the Android linker paths, and disables MIT-SHM. The latter is important in this
 chroot: the current libhybris code does not check a failed `shmat()` before
 copying to the returned address. Disabling SHM selects the `XPutImage` fallback.
 It also sets `LD_PRELOAD=/opt/pvr-bridge/opengl/lib/libhybris-ctype-fix.so`,
-which repairs the glibc ctype TLS slot that Android's `libEGL.so` overwrites.
+which repairs the glibc ctype TLS slot for libhybris builds that do not carry
+`libhybris-egl-ctype-restore.patch`; the staged `libEGL` restores the slot
+itself, so the preload is only a fallback. Paths supplied by the caller come
+first in `LD_LIBRARY_PATH`, which is what lets `desktop/bin/gpu-env` put GL4ES
+ahead of Mesa.
 Set `DISPLAY` before invocation to target a different X server. This confirms a
 visible GLES path for this benchmark, not desktop OpenGL or Minecraft
 compatibility.
 
-The working libhybris build carries three local patches under `patches/`:
+The working libhybris build carries four local patches under `patches/`:
 
 - `libhybris-egl-terminate-order.patch` calls the vendor `eglTerminate()`
   before `ws_Terminate()` unloads the platform module. The vendor driver keeps
   callbacks into `eglplatform_x11.so` and calls them while terminating the
   display, so unloading first sent those calls into unmapped memory and made
   every GLES application die with `SIGSEGV` at exit.
+- `libhybris-egl-ctype-restore.patch` saves glibc's `__ctype_b` TLS pointer
+  across `android_dlopen()` of the vendor EGL/GLES libraries and restores it
+  afterwards, because bionic's `TLS_SLOT_OPENGL` aliases that slot. This makes
+  the fix part of the library instead of requiring `LD_PRELOAD` in every
+  process.
 - `libhybris-x11-destroy-buffers.patch` removes invalid list iterator use from
   native-window buffer cleanup.
 - `libhybris-x11-swap-red-blue.patch` swaps red and blue in `copyToX11()` for
@@ -204,6 +220,66 @@ make -C "$LIBHYBRIS_BUILD/hybris/egl" -j4 \
 Then copy `hybris/egl/.libs/libEGL.so.1.0.0` to
 `/opt/pvr-bridge/opengl/lib/` inside the chroot and re-run
 `scripts/verify-all.sh`.
+
+## Desktop OpenGL through GL4ES
+
+Mesa cannot present vendor frames to Termux:X11 (`screen 0 does not appear to be
+DRI3 capable`), and Zink needs Vulkan extensions the 1.1 DDK does not have, so
+desktop OpenGL is provided by GL4ES translating GL 2.1 to vendor GLES. GL4ES is
+built for armhf with `HYBRIS=ON` and `GLX_STUBS=ON`:
+
+```sh
+cmake -S "$GL4ES_SRC" -B "$HOME/mesa-pvr-build/build-gl4es" \
+  -DCMAKE_TOOLCHAIN_FILE="$HOME/mesa-pvr-build/armhf-toolchain.cmake" \
+  -DHYBRIS=ON -DGLX_STUBS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+make -C "$HOME/mesa-pvr-build/build-gl4es" -j4
+```
+
+The build writes `lib/libGL.so.1` into the GL4ES source tree, not the build
+directory. Stage it as `/opt/pvr-bridge/gl4es/lib/libGL.so.1` (plus a
+`libGL.so` symlink) inside the chroot.
+
+`patches/gl4es-hybris-eglplatform.patch` is required. Upstream GL4ES asks for
+`EGL_PLATFORM_ANDROID_KHR` whenever `HYBRIS` is defined, in both
+`GetHardwareExtensions()` and `init_display()`. libhybris maps that platform to
+its passthrough ("null") winsys, and because libhybris allows only one winsys
+per process, the extension probe locked out the X11 winsys for the rest of the
+run. `eglCreateWindowSurface()` then failed its
+`ANDROID_NATIVE_WINDOW_MAGIC` assertion on a plain X11 `Window`. With the patch,
+GL4ES honours `HYBRIS_EGLPLATFORM` and calls `eglGetDisplay()` so the X11
+winsys is loaded.
+
+Verify the path with the GLX probe or with `glmark2`:
+
+```sh
+chroot /data/local/nhsystem/kali-armhf /usr/bin/env -i HOME=/root \
+  PATH=/usr/bin:/bin DISPLAY=:1 \
+  /opt/pvr-bridge/desktop/bin/gpu-env /tmp/glx-probe
+```
+
+Expected output:
+
+```
+glx-probe: client vendor  = ptitSeb
+glx-probe: client version = 1.4 GL4ES
+glx-probe: GL_VENDOR    = GL4ES wrapping Imagination Technologies
+glx-probe: GL_RENDERER  = GL4ES using PowerVR Rogue GE8322
+glx-probe: GL_VERSION   = 2.1 gl4es wrapper 1.1.7
+glx-probe: center pixel  = 64 128 191 255
+glx-probe: PASS
+```
+
+Measured on this device at 480x320, `glmark2 --benchmark build` scores 139
+through GL4ES and 39 on Mesa llvmpipe. `scripts/verify-all.sh` reports
+`PASS desktop-gl-gl4es` with the renderer string as evidence.
+
+`desktop/gpu-env.sh` is the single place that sets the whole stack
+(`LD_LIBRARY_PATH`, `LIBGL_EGL`, `LIBGL_GLES`, `HYBRIS_*`,
+`ANDROID_ROOT`/`ANDROID_DATA`). `desktop/start-xfce.sh` sources it before
+`startxfce4`, so every XFCE child inherits the GPU environment. No
+`LD_PRELOAD` is used: the ctype repair lives in `libEGL`, which keeps Android
+binaries launched from desktop terminals working. Set `PVR_DESKTOP_GL=mesa` to
+get Mesa llvmpipe (GL 4.5) for a session that needs a newer GL version.
 
 ## Build the diagnostic probes
 
@@ -310,29 +386,28 @@ redrawn visible test.
 1. **SHM safety:** add a checked `shmat()` failure path in libhybris and fall
    back to `XCreateImage`/`XPutImage` automatically, rather than requiring
    `HYBRIS_X11_DISABLE_SHM=1`.
-2. **Shutdown crash:** visible frames and repeated swaps work in `--run-forever`
-   with SHM disabled, but a one-shot glmark2 run segfaults during shutdown.
-   Symbolize the latest core and isolate EGL surface destruction, native-window
-   refcounts, and gralloc buffer release.
-3. **TLS collision:** the ctype shim repairs glibc's `__ctype_b` slot at call
-   time, but Android libraries still write other bionic TLS slots into glibc's
-   thread block. Audit the remaining slots (`TLS_SLOT_STACK_GUARD`,
-   `TLS_SLOT_SANITIZER`, `TLS_SLOT_ART_THREAD_SELF`) and prefer a libhybris fix
-   over more preloads.
+2. **Shutdown crash:** fixed by `libhybris-egl-terminate-order.patch`; one-shot
+   glmark2 now exits 0. Keep the `FULL=1` check in the gate so it stays fixed.
+3. **TLS collision:** the staged `libEGL` now restores glibc's `__ctype_b` slot
+   around the vendor `dlopen()` (`libhybris-egl-ctype-restore.patch`), so no
+   preload is needed. Android libraries still write other bionic TLS slots into
+   glibc's thread block; audit `TLS_SLOT_STACK_GUARD`, `TLS_SLOT_SANITIZER`,
+   and `TLS_SLOT_ART_THREAD_SELF` and prefer libhybris fixes over preloads.
 4. **Native-window compatibility:** compare Android's real `ANativeWindow`
    contract and gralloc/mapper behavior with libhybris's X11 shim. Test a
    safer bridge (for example, rendering to an Android-compatible buffer and
    presenting it through X11 DRI3) if direct window surfaces are not viable.
-5. **GLES benchmark:** once shutdown is clean, run the full timed GLES2 suite
-   and verify `GL_RENDERER` plus visible output. Do not use GLX `glmark2` as
-   evidence for this vendor GLES path.
-6. **Desktop / Minecraft:** identify whether the target launcher needs desktop
-   GL, GLX, or can run through GLES. Vendor GLES 3.2 is not automatically
-   desktop OpenGL; test its actual renderer path separately before claiming
-   Minecraft compatibility.
-7. **Desktop:** test a lightweight desktop with
-   compositing disabled. Verify renderer strings per process; avoid claiming
-   acceleration if apps fall back to `llvmpipe`/`softpipe`.
+5. **GLES benchmark:** run the full timed GLES2 suite now that shutdown is
+   clean; verify `GL_RENDERER` plus visible output. Do not use GLX `glmark2`
+   as evidence for the vendor GLES path, and do not use vendor GLES numbers as
+   evidence for desktop GL (use `desktop-gl-gl4es` for that).
+6. **Desktop / Minecraft:** desktop GL 2.1 now works through GL4ES on the
+   vendor GPU. Minecraft 1.12.2 still needs a private ARMHF Java 8, and the
+   replacement Prism launcher is not installed yet; verify per-process renderer
+   strings before claiming a game runs on the GPU.
+7. **Desktop:** the session environment is global (`desktop/gpu-env.sh`).
+   Verify renderer strings per process; XFCE's own 2D drawing still uses
+   X11/XRender on the CPU.
 8. **Mesa OpenGL:** keep this separate. Mesa `pvr` is Vulkan-focused and its
    queue submit/swapchain paths still fail. Do not replace Kali's default GL or
    Vulkan drivers; retain the vendor paths as fallback.

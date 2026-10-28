@@ -18,7 +18,8 @@ HYBRIS_EGLPLATFORM_DIR=${HYBRIS_EGLPLATFORM_DIR:-/opt/pvr-bridge/opengl/eglplatf
 # SysV SHM can fail from the Kali chroot; libhybris's X11 path otherwise
 # passes shmat's (void *)-1 result to memcpy. XPutImage is the safe fallback.
 HYBRIS_X11_DISABLE_SHM=${HYBRIS_X11_DISABLE_SHM:-1}
-LD_LIBRARY_PATH="/opt/pvr-bridge/opengl/lib:/opt/pvr-bridge/lib:/usr/lib/arm-linux-gnueabihf${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Caller-supplied paths win, so an alternative libGL (GL4ES) can be selected.
+LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}/opt/pvr-bridge/opengl/lib:/opt/pvr-bridge/lib:/usr/lib/arm-linux-gnueabihf"
 # Android's libEGL constructor writes bionic TLS slot 4 (thread pointer + 16),
 # which is where glibc keeps its thread-local __ctype_b pointer. Without the
 # fix, Xlib's locale parser reads a bogus ctype table and walks off the stack

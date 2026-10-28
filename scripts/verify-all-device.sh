@@ -99,6 +99,21 @@ else
     fail "desktop-gl-baseline"
 fi
 
+echo "=== desktop OpenGL (GL4ES on vendor GLES) ==="
+
+if [ ! -r "$CH/opt/pvr-bridge/desktop/bin/gpu-env" ]; then
+    fail "desktop-gl-gl4es (gpu-env missing)"
+elif timeout 300 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+        DISPLAY=:1 /opt/pvr-bridge/desktop/bin/gpu-env \
+        /usr/bin/glmark2 --benchmark build:duration=2 --size 480x320 \
+        >"$TMPD/glmark2-desktop.log" 2>&1 \
+        && grep -q "GL4ES using PowerVR Rogue GE8322" "$TMPD/glmark2-desktop.log"; then
+    gl4es_score=$(sed -n 's/.*glmark2 Score: //p' "$TMPD/glmark2-desktop.log" | head -n 1)
+    pass "desktop-gl-gl4es (GL4ES on GE8322, score ${gl4es_score:-?})"
+else
+    fail "desktop-gl-gl4es"
+fi
+
 echo "=== Vulkan (vendor HAL through libsysvk) ==="
 
 if timeout 60 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \

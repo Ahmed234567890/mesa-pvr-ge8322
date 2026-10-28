@@ -1,0 +1,64 @@
+diff --git a/src/glx/glx.c b/src/glx/glx.c
+index 1ba4fd70..f03b0481 100644
+--- a/src/glx/glx.c
++++ b/src/glx/glx.c
+@@ -21,6 +21,7 @@
+ #include <sys/un.h>
+ #endif // PANDORA
+ #include <unistd.h>
++#include <stdlib.h>
+ 
+ #ifdef AMIGAOS4
+ #include "../agl/amigaos.h"
+@@ -387,8 +388,14 @@ static void init_display(Display *display) {
+     }
+ 
+ #ifdef HYBRIS
+-    EGLint attribs[] = { EGL_NONE };
+-    eglDisplay = egl_eglGetPlatformDisplay(EGL_PLATFORM_ANDROID_KHR, EGL_DEFAULT_DISPLAY, attribs);
++    /* EGL_PLATFORM_ANDROID_KHR makes libhybris load its passthrough ("null")
++     * winsys, which cannot wrap an X11 Window. When the platform is chosen at
++     * runtime (HYBRIS_EGLPLATFORM, e.g. "x11"), let eglGetDisplay() pick it so
++     * that eglCreateWindowSurface() gets a real native window wrapper. */
++    if (!getenv("HYBRIS_EGLPLATFORM")) {
++        EGLint attribs[] = { EGL_NONE };
++        eglDisplay = egl_eglGetPlatformDisplay(EGL_PLATFORM_ANDROID_KHR, EGL_DEFAULT_DISPLAY, attribs);
++    }
+ #endif
+ 
+     if(!eglDisplay) {
+diff --git a/src/glx/hardext.c b/src/glx/hardext.c
+index c89a1237..d971e160 100644
+--- a/src/glx/hardext.c
++++ b/src/glx/hardext.c
+@@ -1,5 +1,7 @@
+ #include "hardext.h"
+ 
++#include <stdlib.h>
++
+ #include "../gl/debug.h"
+ #include "../gl/gl4es.h"
+ #include "../gl/init.h"
+@@ -205,13 +207,18 @@ void GetHardwareExtensions(int notest)
+     else
+ #endif
+ #ifdef HYBRIS
+-    {
++    /* Honour a runtime-selected native EGL platform (HYBRIS_EGLPLATFORM).
++     * Forcing EGL_PLATFORM_ANDROID_KHR here loads libhybris' passthrough
++     * winsys, and since only one winsys may be loaded per process that would
++     * permanently lock out the x11 winsys needed for desktop GL windows. */
++    if (!getenv("HYBRIS_EGLPLATFORM")) {
+         EGLint attribs[] = { EGL_NONE };
+         eglDisplay = egl_eglGetPlatformDisplay(EGL_PLATFORM_ANDROID_KHR, EGL_DEFAULT_DISPLAY, attribs);
+-    }
+-#else
+-        eglDisplay = egl_eglGetDisplay(EGL_DEFAULT_DISPLAY);
++    } else
+ #endif
++    {
++        eglDisplay = egl_eglGetDisplay(EGL_DEFAULT_DISPLAY);
++    }
+ 
+     egl_eglBindAPI(EGL_OPENGL_ES_API);
+     if (egl_eglInitialize(eglDisplay, NULL, NULL) != EGL_TRUE) {

@@ -2,15 +2,21 @@
 # Host-side driver for the GE8322 verification matrix.
 #
 # Usage:
-#   ADB_SERIAL=192.168.1.16:46767 scripts/verify-all.sh
-#   FULL=1 ADB_SERIAL=... scripts/verify-all.sh
+#   scripts/verify-all.sh
+#   FULL=1 scripts/verify-all.sh
+#   ADB_SERIAL=192.168.1.16:5555 scripts/verify-all.sh
 #
 # The device writes its own log to /data/local/tmp/verify-all.log and the host
 # pulls it afterwards.  That way a Wi-Fi ADB drop under load loses the console
 # but not the results.
 set -u
 
-: "${ADB_SERIAL:?Set ADB_SERIAL, for example ADB_SERIAL=192.168.1.16:46767}"
+# Wireless ADB rotates its port on reconnect, so pick the only online device
+# when ADB_SERIAL is not given.
+if [ -z "${ADB_SERIAL:-}" ]; then
+    ADB_SERIAL=$(adb devices | awk '$2 == "device" { print $1; exit }')
+fi
+: "${ADB_SERIAL:?Set ADB_SERIAL, or connect one device with adb connect}"
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
 OUT_DIR=${OUT_DIR:-/tmp/opencode}

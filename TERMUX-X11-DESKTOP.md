@@ -14,7 +14,11 @@ that XFCE or Minecraft is GPU-accelerated.
   `dbus-daemon` only; `desktop/start-xfce.sh` does that and also keeps Android's
   `SHELL=/system/bin/sh` and `LD_PRELOAD` out of the session (see below). The
   desktop is drawn through X11, not through the vendor GLES path, so its
-  appearance is not evidence of GPU acceleration.
+  appearance is not evidence of GPU acceleration. Since 2026-10-28 the session
+  environment does point every child at the vendor GPU (`desktop/gpu-env.sh`,
+  sourced by `start-xfce.sh`), so GL clients such as `glxinfo`, `glmark2`, and
+  games render on the GE8322 through GL4ES; XFCE's own 2D drawing still uses
+  X11/XRender on the CPU.
 - Prism Launcher 11.1.1 was removed on 2026-10-27 so a different Prism version
   can be installed. Only the launcher was deleted: its private `user-data`
   (instances, accounts, game data), the staged Java/Qt/GL4ES runtime and the
@@ -60,8 +64,9 @@ Two Android variables must not leak into the session:
   preload made the shell fail to link.
 
 Build and stage the helper, then use `desktop/start-xfce.sh`, which starts a
-bus with the shim scoped to `dbus-daemon`, sets `SHELL=/bin/bash`, and clears
-`LD_PRELOAD` before `exec startxfce4`:
+bus with the shim scoped to `dbus-daemon`, sets `SHELL=/bin/bash`, clears
+`LD_PRELOAD`, and sources `desktop/gpu-env.sh` so the whole session gets the
+vendor GPU stack (libhybris EGL/GLES plus GL4ES for desktop GL):
 
 ```sh
 arm-none-linux-gnueabihf-gcc --sysroot=$SYSROOT -O2 -Wall -Wextra \
@@ -71,8 +76,18 @@ CH=/data/local/nhsystem/kali-armhf
 su -c "mkdir -p \$CH/opt/pvr-bridge/desktop/lib \$CH/opt/pvr-bridge/desktop/bin
   cp libselinux-off.so \$CH/opt/pvr-bridge/desktop/lib/
   cp desktop/start-xfce.sh \$CH/opt/pvr-bridge/desktop/bin/start-xfce
-  chmod 755 \$CH/opt/pvr-bridge/desktop/bin/start-xfce
+  cp desktop/gpu-env.sh \$CH/opt/pvr-bridge/desktop/bin/gpu-env
+  chmod 755 \$CH/opt/pvr-bridge/desktop/bin/start-xfce \$CH/opt/pvr-bridge/desktop/bin/gpu-env
   chmod 644 \$CH/opt/pvr-bridge/desktop/lib/libselinux-off.so"
+```
+
+No `LD_PRELOAD` is exported to the session. The ctype/TLS repair needed by
+libhybris lives inside the staged `libEGL`, so Android binaries started from
+desktop terminals still link normally. `desktop/gpu-env.sh` can also wrap a
+single command:
+
+```sh
+/opt/pvr-bridge/desktop/bin/gpu-env glxinfo -B    # GL4ES on GE8322
 ```
 
 Then start the session:

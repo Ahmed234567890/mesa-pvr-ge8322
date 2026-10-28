@@ -22,6 +22,10 @@ readiness or Vulkan conformance.
 | `glmark2-es2-x11 --validate` via vendor GLES | Mesa path not tested | Pass: reports GE8322, validates scenes, exits 0 |
 | `glmark2-es2-x11` timed scene via vendor GLES | Mesa path not tested | Pass: renders visible GE8322 scenes, `--run-forever` and one-shot both exit 0 |
 | `glmark2-es2 --off-screen --validate` via default EGL | Reports Mesa llvmpipe | Most validation cases pass; software GLES, not GE8322 |
+| Desktop OpenGL (`glx-probe`, GLX window) via GL4ES | Mesa llvmpipe only | Pass: `GL4ES using PowerVR Rogue GE8322`, GL 2.1, correct readback, exit 0 |
+| `glmark2 --benchmark build` (GLX) via GL4ES | llvmpipe score 39 | Pass: GE8322 score 139 at 480x320, exit 0 |
+| Vendor GLES X11 without `LD_PRELOAD` | n/a | Pass: GE8322, score 212; ctype repair is inside `libEGL` |
+| Whole XFCE session with `desktop/bin/gpu-env` | n/a | Pass: every child inherits the vendor GPU environment; no preload |
 
 `vulkaninfo --summary` reported API `1.2.363`, device `PowerVR Rogue GE8322`,
 and conformance version `1.4.3.3`. The latter is a driver-reported property,
@@ -36,14 +40,19 @@ and pulls the device-side log with retries, so a Wi-Fi ADB drop under load does
 not lose the results.
 
 ```sh
-ADB_SERIAL=192.168.1.16:46767 scripts/verify-all.sh
-FULL=1 ADB_SERIAL=192.168.1.16:46767 scripts/verify-all.sh   # adds glmark2
+scripts/verify-all.sh
+FULL=1 scripts/verify-all.sh          # adds glmark2
+ADB_SERIAL=192.168.1.16:5555 scripts/verify-all.sh
 ```
+
+When `ADB_SERIAL` is unset the driver uses the only device `adb devices`
+reports as online, which avoids the wireless port rotating between sessions.
 
 The matrix covers: chroot and Android bind mounts, the X server and a client
 handshake, the vendor GLES pbuffer and X11 probes, the desktop OpenGL baseline
-renderer, the vendor Vulkan ICD (`vulkaninfo`, compute submit, presentation),
-an H.264 hardware encode plus an `ffmpeg` decode check, and the XFCE session.
+renderer, the GL4ES desktop path on the vendor GPU, the vendor Vulkan ICD
+(`vulkaninfo`, compute submit, presentation), an H.264 hardware encode plus an
+`ffmpeg` decode check, and the XFCE session.
 Checks that are tracked as known limitations report `XFAIL` and do not fail the
 run. Logs are written under `/tmp/opencode/`, never into the repository.
 
