@@ -1,0 +1,36 @@
+diff --git a/hybris/egl/egl.c b/hybris/egl/egl.c
+--- a/hybris/egl/egl.c
++++ b/hybris/egl/egl.c
+@@ -89,8 +89,32 @@
+ 
+ static void _init_androidegl()
+ {
++	/*
++	 * bionic's TLS_SLOT_OPENGL is thread pointer + 16, which on 32-bit ARM
++	 * glibc is where the thread-local __ctype_b pointer lives. Android's
++	 * libEGL writes that slot from its constructor, so after the dlopen
++	 * every isspace()/isalpha() call in this process reads a bionic table
++	 * and Xlib's locale parser walks off the end of its buffer.
++	 *
++	 * Keep glibc's value across the load and put it back. The vendor
++	 * libraries only write the slot while they are being initialised, so
++	 * restoring here is enough and does not need a preloaded interposer.
++	 */
++#if defined(__arm__) && !defined(__aarch64__)
++	void *tp;
++	void *saved_ctype_b;
++
++	__asm__ volatile ("mrc p15, 0, %0, c13, c0, 3" : "=r" (tp));
++	saved_ctype_b = ((void **) tp)[4];
++#endif
++
+ 	egl_handle = (void *) android_dlopen(getenv("LIBEGL") ? getenv("LIBEGL") : "libEGL.so", RTLD_LAZY);
+ 	glesv2_handle = (void *) android_dlopen(getenv("LIBGLESV2") ? getenv("LIBGLESV2") : "libGLESv2.so", RTLD_LAZY);
++
++#if defined(__arm__) && !defined(__aarch64__)
++	__asm__ volatile ("mrc p15, 0, %0, c13, c0, 3" : "=r" (tp));
++	((void **) tp)[4] = saved_ctype_b;
++#endif
+ }
+ 
+ static inline void hybris_egl_initialize()

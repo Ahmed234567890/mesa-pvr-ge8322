@@ -20,8 +20,12 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > results. Preliminary vendor GLES via libhybris can render/read back an
 > offscreen pbuffer. A custom X11 window probe segfaults. `glmark2-es2-x11`
 > identifies the GE8322; with MIT-SHM disabled, moving and textured scenes are
-> visible on Termux:X11. One-shot shutdown still crashes. Normal GLX `glmark2`
-> runs report llvmpipe rather than hardware acceleration.
+> visible on Termux:X11, and one-shot runs now exit cleanly after the
+> `eglTerminate` ordering fix. Desktop OpenGL 2.1 is available through GL4ES on
+> the vendor GLES driver (`GL4ES using PowerVR Rogue GE8322`, `glmark2` score
+> 139 versus 39 on llvmpipe), and the XFCE session exports that environment to
+> every child. Mesa GLX still reports llvmpipe, and OpenGL 3.x/4.x is not
+> available on this hardware.
 
 ## Start here
 

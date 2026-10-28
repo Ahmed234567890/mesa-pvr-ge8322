@@ -20,9 +20,17 @@ SHELL=/bin/bash
 TMPDIR=/tmp
 XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/tmp/xfce-runtime}
 SELINUX_SHIM=${SELINUX_SHIM:-/opt/pvr-bridge/desktop/lib/libselinux-off.so}
+GPU_ENV=${GPU_ENV:-/opt/pvr-bridge/desktop/bin/gpu-env}
 
 export DISPLAY HOME SHELL TMPDIR XDG_RUNTIME_DIR
 unset LD_PRELOAD 2>/dev/null || true
+
+# Give the whole session the vendor GPU stack (EGL/GLES/GL4ES). No preload is
+# involved: the ctype/TLS collision is handled inside the staged libEGL.
+if [ -r "$GPU_ENV" ]; then
+    set --
+    . "$GPU_ENV"
+fi
 
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
