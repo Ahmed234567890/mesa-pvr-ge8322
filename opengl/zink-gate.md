@@ -1,79 +1,39 @@
-# Zink evidence gate (WS8)
+# Zink evidence gate (WS8, re-opened for Phase 2)
 
-Status: **closed for the GE8322 with vendor DDK 1.18@6267915.**
+Status: **closed for the GE8322 with vendor DDK 1.18@6267915 — now for two
+independent reasons.**
 
 This note records why desktop OpenGL on this phone is delivered by GL4ES rather
-than by Mesa's Zink. It replaces the earlier assumption that Zink was blocked
-because the vendor Vulkan driver lacked "the extensions". Extension coverage is
-in fact broad; Zink is blocked by one mandatory *feature*.
+than by Mesa's Zink.
+
+The gate was originally closed because Zink refused to create a screen without
+`VK_EXT_robustness2.nullDescriptor`. Phase 2 removed that blocker and Zink now
+*starts*. It still cannot be used, because:
+
+1. the vendor Vulkan driver has no `VK_EXT_transform_feedback`, which Mesa
+   requires for both GL 3.0 and GLES 3.0, so the screen is capped at **GL 2.1**
+   (the same ceiling GL4ES already delivers); and
+2. the vendor driver **crashes on the first draw** Zink emits, so the 2.1
+   screen is not usable for rendering either.
 
 ## Device as seen by Vulkan
-
-Captured with `vulkaninfo` from the Kali chroot through
-`/opt/pvr-bridge/desktop/bin/gpu-env`:
 
 ```
 apiVersion    = 1.3.216 (4206808)
 driverVersion = 1.506.1035 (6267915)
 deviceName    = PowerVR Rogue GE8322
 driverID      = DRIVER_ID_IMAGINATION_PROPRIETARY
-driverName    = PowerVR Rogue Vulkan Driver
 driverInfo    = 1.18@6267915
+geometryShader                  = false
+maxGeometryShaderInvocations    = 0
 ```
 
-The device exposes **85 device extensions** and 15 instance extensions (the
-latter include `VK_KHR_surface`, `VK_KHR_xcb_surface`, `VK_KHR_xlib_surface`
-and `VK_EXT_surface_maintenance1` from the X11 WSI layer). This is not a
-"Vulkan 1.1" driver: the instance reports API 1.3.
+The device exposes 93 vendor device extensions plus the one this project's ICD
+adds (`VK_EXT_robustness2`), and 15 instance extensions from the X11 WSI layer.
 
-## Method
+## Phase 1 of the gate (WS8): the nullDescriptor blocker
 
-Three runs, all inside the Kali chroot on Termux:X11 `:1`:
-
-1. Zink against the **vendor** ICD (`sysvk_icd.json`).
-2. Zink against **lavapipe** (`lvp_icd.json`) as a control, to prove Zink itself
-   initialises in this chroot.
-3. Mesa's **pvr** ICD (`powervr_mesa_icd.json`) through GLX, to separate the
-   Mesa `pvr` kernel-interface problem from the Zink problem.
-
-```sh
-E="HOME=/root PATH=/usr/bin:/bin DISPLAY=:1 \
-   LD_LIBRARY_PATH=/opt/pvr-bridge/lib:/usr/lib/arm-linux-gnueabihf \
-   HYBRIS_LINKER_DIR=/opt/pvr-bridge/libhybris/linker \
-   HYBRIS_ANDROID_SDK_VERSION=34 \
-   HYBRIS_LD_LIBRARY_PATH=/system/lib:/vendor/lib:/vendor/lib/hw:/odm/lib:/apex/com.android.runtime/lib \
-   VK_ICD_FILENAMES=/opt/pvr-bridge/share/vulkan/icd.d/sysvk_icd.json \
-   VK_ADD_IMPLICIT_LAYER_PATH=/opt/pvr-bridge/share/vulkan/implicit_layer.d \
-   VK_LOADER_LAYERS_DISABLE=VK_LAYER_MESA_device_select,VK_LAYER_MESA_anti_lag"
-
-# 1. vendor ICD
-chroot $CH /usr/bin/env -i $E \
-  MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink \
-  /usr/bin/glxinfo -B
-
-# 2. control
-chroot $CH /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin DISPLAY=:1 \
-  LD_LIBRARY_PATH=/usr/lib/arm-linux-gnueabihf \
-  VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-  XDG_RUNTIME_DIR=/tmp/xfce-runtime LIBGL_ALWAYS_SOFTWARE=1 \
-  MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink \
-  /usr/bin/glxinfo -B
-```
-
-## Results
-
-### 1. Vendor ICD: fails on a mandatory feature
-
-```
-MESA: error: Zink requires the nullDescriptor feature of KHR/EXT robustness2.
-glx: failed to create drisw screen
-failed to load driver: zink
-```
-
-Exit status 139. The failure happens after Zink has enumerated and selected the
-vendor physical device, so device discovery and instance creation succeed.
-
-Mesa 26/27 makes this a hard gate in
+Zink 26/27 makes robustness2 a hard gate in
 `src/gallium/drivers/zink/zink_screen.c`:
 
 ```c
@@ -83,116 +43,182 @@ if (!screen->info.rb2_feats.nullDescriptor) {
 }
 ```
 
-`VK_EXT_robustness2` does not appear at all in the vendor device's 85
-extensions, so the feature is zero-initialised and the check always fails.
-There is no environment variable or driconf switch that bypasses it.
+The vendor exposes no `VK_EXT_robustness2`, so the feature was zero and screen
+creation failed with exit status 139.
 
-### 2. Control: Zink works in this chroot
+`libsysvk` now supplies the missing extension (Phase 2a, see
+[../bridge/README.md](../bridge/README.md)): with `SYSVK_ENABLE_RB2=1` it
+appends `VK_EXT_robustness2` to `vkEnumerateDeviceExtensionProperties`, reports
+`nullDescriptor = 1` through `vkGetPhysicalDeviceFeatures2`, and strips the name
+again in `vkCreateDevice` because the vendor would reject it. `vulkaninfo` then
+lists 94 device extensions including `VK_EXT_robustness2`.
+
+The shim is opt-in so that no other Vulkan client is told it has a capability
+the vendor lacks; the Zink checks in the harness set the variable explicitly.
+Without it the vendor's 93 extensions are passed through unchanged.
+
+Caveat: the feature is *advertised*, not translated. The vendor has no
+robustness2 support, so an application that actually samples a null descriptor
+would still reach code that assumes a real resource. Zink only relies on it for
+unused bindings at this version.
+
+## Phase 2 of the gate: a vendor `vkQueueSubmit` bug
+
+With the screen created, the first Zink run crashed inside the vendor's
+`vkQueueSubmit` (`vulkan.sp9863a.so`, file offset `0x4f6f8`, `ldr r0,[r0,#8]`
+with `r0 = 0`), before any descriptor set had been allocated.
+
+Tracing the submit path in `libsysvk` showed the trigger:
 
 ```
-OpenGL vendor string:   Mesa
-OpenGL renderer string: zink Vulkan 1.4(llvmpipe (LLVM 21.1.8, 128 bits) (MESA_LLVMPIPE))
-OpenGL version string:  4.6 (Compatibility Profile) Mesa 26.0.8-1
+QueueSubmit submits=2 fence=(nil)
+  submit[0] cmds=1 waits=0 signals=0 pNext=(nil)
+  submit[1] cmds=0 waits=0 signals=1 pNext=...   <-- crashes the vendor
 ```
 
-Exit status 0. This isolates the vendor failure: the Zink loader, GLX glue,
-shader compiler and presentation stack all work here; only the vendor device is
-rejected.
+Zink submits a second batch that only signals a timeline semaphore. That is
+legal Vulkan, but the vendor dereferences the first command buffer of every
+submit entry. Stripping `pNext` did not help; skipping the empty entry did, so
+the fault is the zero `commandBufferCount`, not the timeline chain.
 
-### 3. Mesa `pvr` ICD: a separate blocker
+`libsysvk` now substitutes a recorded empty command buffer
+(`VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT`) allocated from a per-queue-family
+pool, so semaphore and fence semantics are preserved instead of dropped. Queue
+families are recorded from `vkGetDeviceQueue`/`vkGetDeviceQueue2`. This is a
+general ICD correctness fix: any Vulkan client that submits a
+semaphore-signalling batch without work would have crashed the vendor driver.
+
+Result: `glxinfo -B` exits 0 and reports
 
 ```
-screen 0 does not appear to be DRI3 capable
-MESA: error: ZINK: vkEnumeratePhysicalDevices failed (VK_ERROR_INITIALIZATION_FAILED)
-MESA: error: ZINK: failed to choose pdev
-OpenGL renderer string: llvmpipe (LLVM 21.1.8, 128 bits)
+OpenGL renderer string: zink Vulkan 1.3(PowerVR Rogue GE8322 (IMAGINATION_PROPRIETARY))
+OpenGL version string: 2.1 Mesa 26.0.8-1
+Preferred profile: compat (0x2)
+Max core profile version: 0.0
+Max compat profile version: 2.1
+Max GLES[23] profile version: 2.0
 ```
 
-Mesa's `pvr` Vulkan driver cannot initialise because it targets the
-`drm/imagination` kernel interface, while this phone runs the vendor
-`pvrsrvkm` module. That is independent of Zink and is the same root cause as the
-queue-submit `EINVAL` recorded in [../TESTING.md](../TESTING.md).
+## Why the ceiling is GL 2.1: no transform feedback
 
-Note on the DRI3 message: `xdpyinfo -queryExtensions` on Termux:X11 `:1`
-advertises both `DRI3` (opcode 147) and `Present` (opcode 146). The message is
-emitted by Mesa's GLX when *its* DRI3 screen setup fails for a driver, not
-because the X server lacks the extension. The earlier statement that Mesa
-"cannot present vendor frames because Termux:X11 is not DRI3 capable" is
-therefore inaccurate and has been corrected.
+Mesa computes the advertised version from a fixed requirement list in
+`src/mesa/main/version.c` (`compute_version`). GL 3.0 requires 22 extensions
+plus `GLSLVersion >= 130`, four colour attachments and four samples. Zink's
+screen was checked against that list:
 
-## Extension coverage against Zink's needs
+| Requirement | Status |
+|---|---|
+| `GL_ARB_shadow`, `ARB_vertex_shader`, `ARB_fragment_shader` | present |
+| `GL_EXT_blend_equation_separate`, `EXT_stencil_two_side`, `EXT_texture_sRGB` | present |
+| `GL_ARB_color_buffer_float`, `ARB_depth_buffer_float`, `ARB_half_float_vertex` | present |
+| `GL_ARB_map_buffer_range`, `ARB_shader_texture_lod`, `ARB_texture_float` | present |
+| `GL_ARB_texture_rg`, `ARB_texture_compression_rgtc`, `EXT_draw_buffers2` | present |
+| `GL_ARB_framebuffer_object`, `EXT_framebuffer_sRGB`, `EXT_packed_float` | present |
+| `GL_EXT_texture_array`, `EXT_texture_integer`, `EXT_texture_shared_exponent` | present |
+| `GL_NV_conditional_render` | present |
+| **`GL_EXT_transform_feedback`** | **missing** |
 
-| Extension / feature | Present | Zink's use |
-|---|---|---|
-| `VK_EXT_robustness2` (`nullDescriptor`) | **no** | **Hard requirement**; screen creation fails without it |
-| `VK_KHR_dynamic_rendering` | yes (rev 1) | Core rendering path |
-| `VK_KHR_synchronization2` | yes (rev 1) | Core synchronisation |
-| `VK_KHR_timeline_semaphore` | yes (rev 2) | Required, or Vulkan 1.2 `timelineSemaphore` |
-| `VK_EXT_extended_dynamic_state` | yes (rev 1) | Dynamic state |
-| `VK_EXT_extended_dynamic_state2` | yes (rev 1) | Dynamic state |
-| `VK_KHR_imageless_framebuffer` | yes (rev 1) | Framebuffer objects |
-| `VK_KHR_create_renderpass2` | yes (rev 1) | Render passes |
-| `VK_KHR_copy_commands2` | yes (rev 1) | Blit/copy paths |
-| `VK_KHR_draw_indirect_count` | yes (rev 1) | Indirect draws |
-| `VK_KHR_maintenance1` | yes (rev 2) | Base requirement |
-| `VK_KHR_maintenance2`/`3`/`4` | yes | Base requirements |
-| `VK_EXT_scalar_block_layout` | yes (rev 1) | Base requirement |
-| `VK_KHR_swapchain` | yes (rev 70) | Presentation through the WSI layer |
-| `VK_ANDROID_external_memory_android_hardware_buffer` | yes (rev 5) | WSI buffer export |
-| `VK_KHR_present_id` | yes (rev 1) | Presentation timing |
-| `VK_EXT_custom_border_color` | no | Warning only: "some incorrect rendering might occur" |
-| `VK_EXT_line_rasterization` | no | Warning only |
-| `VK_EXT_transform_feedback` | no | Optional; disables device-address commands |
-| `VK_EXT_vertex_input_dynamic_state` | no | Optional; disables device-address commands |
-| `VK_KHR_maintenance5`/`6`/`11` | no | Optional; maintenance11 only gates shader objects |
-| `VK_EXT_descriptor_buffer` | no | Optional fast path |
-| `VK_KHR_unified_image_layouts` | no | Optional layout workaround |
-| `VK_EXT_host_image_copy` | no | Optional upload fast path |
-| `VK_EXT_shader_object` | no | Optional; gated by maintenance11 |
-| `VK_KHR_device_address_commands` | no | Optional |
-| `VK_EXT_physical_device_drm` | no | Optional; single-device fallback selects device 0 |
-| `VK_KHR_present_wait` | no | Optional presentation feature |
+That is the only gap. Three independent checks confirm it is the whole story:
 
-Conclusion: the only item in the mandatory column that is missing is
-`nullDescriptor`. If a future DDK adds `VK_EXT_robustness2` (or the check is
-relaxed upstream), Zink would have a realistic chance on this device, because
-dynamic rendering, synchronisation2, timeline semaphores, imageless
-framebuffers and the maintenance family are all present.
+- `MESA_GLSL_VERSION_OVERRIDE=450` alone does **not** raise the version, so
+  `consts->GLSLVersion` is already 460 (Zink sets `caps->glsl_feature_level =
+  460` unconditionally in `zink_init_screen_caps`); the GLSL level is not the
+  limit.
+- Forcing `MESA_GL_VERSION_OVERRIDE=4.5` does produce a real 4.5 core context
+  (`GL_VERSION: 4.5 (Core Profile)`, `GLSL: 4.50`), which proves the rest of
+  the Mesa/Zink/GLX stack is functional — it is a *capability* gap, not a
+  plumbing gap. It is not a usable configuration: it advertises transform
+  feedback that the driver cannot implement.
+- `compute_version_es2` requires `EXT_transform_feedback` for GLES 3.0 as
+  well, which is why the same screen reports GLES 2.0.
 
-## Driver-version note
-
-Mesa also warns about the proprietary Imagination driver:
+Root cause on the Vulkan side: the vendor driver has **no
+`VK_EXT_transform_feedback`** (and no `VK_EXT_geometry_shader`), consistent
+with `geometryShader = false` and `maxGeometryShaderInvocations = 0` for this
+Rogue core. Zink implements GL stream output only through
+`VK_EXT_transform_feedback`:
 
 ```c
-/* Reject IMG blobs with DDK below 24.1@6554834 if not forced */
-if (zink_driverid(screen) == VK_DRIVER_ID_IMAGINATION_PROPRIETARY &&
-    screen->info.props.driverVersion < 6554834) {
-   debug_printf("zink: Imagination proprietary driver is too old to be supported, expect failure\n");
-   if (screen->driver_name_is_inferred)
-      goto fail;
-}
+caps->max_stream_output_buffers =
+   screen->info.have_EXT_transform_feedback ? ... : 0;
 ```
 
-This device reports `1.18@6267915`, below the `24.1@6554834` threshold. Because
-`VK_KHR_driver_properties` is exposed, the driver name is not inferred, so this
-is a warning rather than a hard failure. It is nevertheless a second signal
-that DDK 1.18 predates the driver generation Zink targets.
+so `caps.stream_output` is false and `GL_EXT_transform_feedback` is never
+enabled.
+
+Both GL 3.0 and GLES 3.0 make transform feedback core, so **no amount of
+extension shimming in the ICD can lift the 2.1 ceiling**. The vendor's own GLES
+driver does support GLES 3.2, which means the hardware can emulate transform
+feedback in software; the vendor Vulkan driver simply does not expose it.
+
+## Stability: Zink crashes on the first draw
+
+Even at GL 2.1 the path is not usable:
+
+| Program | Result |
+|---|---|
+| `glxinfo -B` | exit 0, renderer/version as above (never draws) |
+| `glxgears` | SIGSEGV (139) after printing `GL_RENDERER`, before the first frame |
+| `glmark2 --validate` | SIGSEGV (139), no validation result |
+| `glmark2 -b :duration=2.0` | SIGSEGV (139), no score |
+
+`gdb` shows the fault in a driver worker thread (`glmark2:gdrv0`) with
+`lr = 0xffffffff` and a corrupted backtrace — the same signature class as the
+`vkQueueSubmit` fault, i.e. a vendor call reached with a null or bogus
+structure. Zink also warns that the device lacks `VK_EXT_depth_clip_enable`
+("Incorrect rendering will happen"), so even a fixed crash would need that
+feature for correct clipping.
+
+## Mesa `pvr` remains blocked separately
+
+Mesa's own `pvr` Vulkan driver cannot initialise because it targets the
+`drm/imagination` kernel interface, while this phone runs the vendor
+`pvrsrvkm` module:
+
+```
+MESA: error: ZINK: vkEnumeratePhysicalDevices failed (VK_ERROR_INITIALIZATION_FAILED)
+MESA: error: ZINK: failed to choose pdev
+```
+
+Note on the DRI3 message: `xdpyinfo -queryExtensions` on Termux:X11 `:1`
+advertises both `DRI3` (opcode 147) and `Present` (opcode 146). Mesa's GLX emits
+its DRI3 warning when *its* DRI3 screen setup fails for a driver, not because
+the X server lacks the extension.
 
 ## Decision
 
 - Desktop OpenGL on this phone stays on **GL4ES over vendor GLES** (GL 2.1),
-  documented in [README.md](README.md).
-- Do **not** advertise Zink, Mesa `pvr` GL, or OpenGL 3.x/4.x for the GE8322.
-- Keep the GL4ES path in the verification harness
-  (`desktop-gl-gl4es`) so this decision is continuously evidenced.
-- Re-open this gate only if a newer vendor DDK exposes `VK_EXT_robustness2`
-  with `nullDescriptor`, or if the `drm/imagination` kernel interface becomes
-  available for a Mesa `pvr` path that passes queue submission.
+  documented in [README.md](README.md). Zink is **not** enabled in
+  `desktop/gpu-env.sh`.
+- The `libsysvk` work is kept: the empty-command-buffer fix is a correctness
+  fix for the ICD, and the robustness2 shim plus `SYSVK_DEBUG` tracing are the
+  foundation for any later Vulkan work.
+- Do **not** advertise OpenGL 3.x/4.x for the GE8322 through Zink. The ceiling
+  is a missing Vulkan feature that GL 3.0 requires, not a configuration issue.
+- The verification harness pins the current state: `desktop-gl-zink-screen`
+  asserts that the screen still starts and still reports GL 2.1, and
+  `desktop-gl-zink-draw` is an XFAIL recording the first-draw crash.
+
+## Routes to GL 3.x and beyond
+
+1. **Emulate transform feedback** (Zink/Mesa patch, not an ICD patch). Zink
+   could lower stream output to SSBO writes with rasteriser discard, which is
+   how software GL implementations provide TF. This is upstreamable work in
+   `src/gallium/drivers/zink`, and it would lift both the GL and GLES ceilings.
+2. **Mesa `pvr`** (Phase 4). Requires either the `drm/imagination` kernel
+   interface or a user-space shim over `pvrsrvkm`; this is the long-term route
+   and also the one that removes the vendor GLES driver from the picture.
+3. **Vendor GLES 3.2 through libhybris** for ES workloads. Already works and is
+   unaffected by this gate; it is the correct target for anything that only
+   needs GLES.
 
 ## Evidence files
 
 - `vulkaninfo` full output: captured per run under `/tmp/opencode/`, not
-  committed (it contains the device serial-adjacent identifiers).
-- Zink failure log: `Zink requires the nullDescriptor feature ...`.
-- Control log: `zink Vulkan 1.4(llvmpipe ...)`, GL 4.6.
-- Mesa `pvr` log: `vkEnumeratePhysicalDevices failed (VK_ERROR_INITIALIZATION_FAILED)`.
+  committed (it contains device identifiers).
+- Zink screen log: `zink Vulkan 1.3(PowerVR Rogue GE8322 ...)`, GL 2.1.
+- Requirement matrix: derived from a full `glxinfo` extension dump with Zink.
+- Override controls: `MESA_GLSL_VERSION_OVERRIDE=450` (no change),
+  `MESA_GL_VERSION_OVERRIDE=4.5` (4.5 core context, proves the stack works).
+- Crash logs: `glxgears`, `glmark2 --validate`, `glmark2 -b :duration=2.0`,
+  all exit 139; `gdb` backtrace in thread `glmark2:gdrv0`.

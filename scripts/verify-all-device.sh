@@ -136,6 +136,37 @@ else
     fail "desktop-gl-gl4es"
 fi
 
+echo "=== desktop OpenGL (Zink, experimental) ==="
+
+# Zink screen creation needs the libsysvk VK_EXT_robustness2 shim and the
+# empty-command-buffer submit workaround.  The screen is expected to stay at
+# GL 2.1 because the vendor Vulkan driver has no VK_EXT_transform_feedback,
+# which GL 3.0 and GLES 3.0 require; see opengl/zink-gate.md.
+if timeout 120 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+        DISPLAY=:1 XDG_RUNTIME_DIR=/tmp/xfce-runtime /bin/sh -c \
+        '. /opt/pvr-bridge/bin/pvr-env && SYSVK_ENABLE_RB2=1 MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink exec /usr/bin/glxinfo -B' \
+        >"$TMPD/zink-screen.log" 2>&1 \
+        && grep -q "OpenGL renderer string: zink Vulkan" "$TMPD/zink-screen.log" \
+        && grep -q "Max compat profile version: 2.1" "$TMPD/zink-screen.log"; then
+    pass "desktop-gl-zink-screen (GL 2.1: no VK_EXT_transform_feedback)"
+else
+    fail "desktop-gl-zink-screen"
+fi
+
+# Known limitation: the vendor driver segfaults on the first draw Zink emits,
+# so Zink is not a usable desktop path yet.  Surviving the timeout counts as a
+# pass, so the check flips by itself once the crash is fixed.
+timeout 25 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+    DISPLAY=:1 XDG_RUNTIME_DIR=/tmp/xfce-runtime /bin/sh -c \
+    '. /opt/pvr-bridge/bin/pvr-env && SYSVK_ENABLE_RB2=1 MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink exec /usr/bin/glxgears' \
+    >"$TMPD/zink-draw.log" 2>&1
+zink_rc=$?
+if [ "$zink_rc" -eq 0 ] || [ "$zink_rc" -eq 124 ]; then
+    pass "desktop-gl-zink-draw"
+else
+    xfail "desktop-gl-zink-draw (vendor driver crashes on first Zink draw, rc=$zink_rc)"
+fi
+
 echo "=== Vulkan (vendor HAL through libsysvk) ==="
 
 if timeout 60 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
