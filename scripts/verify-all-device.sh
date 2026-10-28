@@ -146,6 +146,33 @@ else
     fail "vulkan-vendor-present"
 fi
 
+# The whole session uses gpu-env, which must not rely on LD_PRELOAD (that
+# breaks Android binaries started from desktop terminals). Presentation has to
+# work with the environment alone.
+if timeout 120 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+        DISPLAY=:1 /opt/pvr-bridge/desktop/bin/gpu-env /usr/bin/vkcube --c 5 \
+        >"$TMPD/vkcube-no-preload.log" 2>&1 \
+        && grep -q "Selected GPU 0: PowerVR Rogue GE8322" "$TMPD/vkcube-no-preload.log"; then
+    pass "vulkan-session-env-no-preload"
+else
+    fail "vulkan-session-env-no-preload"
+fi
+
+# Repeat the presentation path to catch teardown or lifetime regressions.
+vk_repeat_ok=1
+for i in 1 2 3; do
+    if ! timeout 120 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+            DISPLAY=:1 /opt/pvr-bridge/desktop/bin/gpu-env /usr/bin/vkcube --c 3 \
+            >"$TMPD/vkcube-repeat-$i.log" 2>&1; then
+        vk_repeat_ok=0
+    fi
+done
+if [ "$vk_repeat_ok" -eq 1 ]; then
+    pass "vulkan-repeat-3x"
+else
+    fail "vulkan-repeat-3x"
+fi
+
 echo "=== OpenCL (vendor libPVROCL through libhybris) ==="
 
 if [ ! -x "$CH/opt/pvr-bridge/opengl/bin/opencl-probe" ]; then

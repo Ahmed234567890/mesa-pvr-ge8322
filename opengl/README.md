@@ -137,7 +137,10 @@ Dynamic-loading applications initially failed because the built
 `dlopen()` it. Clearing the executable-stack flag on an isolated staged copy
 made `dlopen(libEGL.so)` and `dlopen(libGLESv2.so)` succeed; the libhybris build
 tree and Kali's default libraries were left unchanged. This is a staging
-workaround, not yet a general packaging fix. Reproduce the private copy with:
+workaround, not yet a general packaging fix. It also matters for Vulkan: the
+loader `dlopen()`s the ICD, so the `libhybris-common.so.1` reachable from
+`/opt/pvr-bridge/lib` must be the cleared copy, otherwise instance creation
+fails with `cannot enable executable stack`. Reproduce the private copy with:
 
 ```sh
 ./opengl/stage-dlopen-safe-common.sh \
@@ -274,12 +277,14 @@ through GL4ES and 39 on Mesa llvmpipe. `scripts/verify-all.sh` reports
 `PASS desktop-gl-gl4es` with the renderer string as evidence.
 
 `desktop/gpu-env.sh` is the single place that sets the whole stack
-(`LD_LIBRARY_PATH`, `LIBGL_EGL`, `LIBGL_GLES`, `HYBRIS_*`,
-`ANDROID_ROOT`/`ANDROID_DATA`). `desktop/start-xfce.sh` sources it before
-`startxfce4`, so every XFCE child inherits the GPU environment. No
-`LD_PRELOAD` is used: the ctype repair lives in `libEGL`, which keeps Android
-binaries launched from desktop terminals working. Set `PVR_DESKTOP_GL=mesa` to
-get Mesa llvmpipe (GL 4.5) for a session that needs a newer GL version.
+(`LD_LIBRARY_PATH` with GL4ES, EGL/GLES and the OpenCL shim, `LIBGL_EGL`,
+`LIBGL_GLES`, `HYBRIS_*`, `ANDROID_ROOT`/`ANDROID_DATA`, and the Vulkan ICD,
+implicit-layer path and loader exclusions). `desktop/start-xfce.sh` sources it
+before `startxfce4`, so every XFCE child inherits the GPU environment. No
+`LD_PRELOAD` is used: the ctype repair lives in `libEGL` and the WSI layer
+loads `libahb-wrapper` itself, which keeps Android binaries launched from
+desktop terminals working. Set `PVR_DESKTOP_GL=mesa` to get Mesa llvmpipe
+(GL 4.5) for a session that needs a newer GL version.
 
 ## OpenCL
 
