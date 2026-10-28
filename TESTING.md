@@ -23,7 +23,7 @@ readiness or Vulkan conformance.
 | `glmark2-es2-x11` timed scene via vendor GLES | Mesa path not tested | Pass: renders visible GE8322 scenes, `--run-forever` and one-shot both exit 0 |
 | `glmark2-es2 --off-screen --validate` via default EGL | Reports Mesa llvmpipe | Most validation cases pass; software GLES, not GE8322 |
 | Desktop OpenGL (`glx-probe`, GLX window) via GL4ES | Mesa llvmpipe only | Pass: `GL4ES using PowerVR Rogue GE8322`, GL 2.1, correct readback, exit 0 |
-| `glmark2 --benchmark build` (GLX) via GL4ES | llvmpipe score 39 | Pass: GE8322 score 139 at 480x320, exit 0 |
+| `glmark2 --benchmark build` (GLX) via GL4ES | llvmpipe ~43 | Pass: GE8322 ~74 at 480x320, exit 0 (~25 vs ~74 on `shading`) |
 | Vendor GLES X11 without `LD_PRELOAD` | n/a | Pass: GE8322, score 212; ctype repair is inside `libEGL` |
 | Whole XFCE session with `desktop/bin/gpu-env` | n/a | Pass: every child inherits the vendor GPU environment; no preload |
 | OpenCL compute via vendor `libPVROCL.so` | Mesa rusticl only | Pass: PowerVR platform, GE8322 device, OpenCL 3.0 (OpenCL C 1.2), kernel result `11 22 33 44`, 3/3 runs |
