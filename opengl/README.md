@@ -233,18 +233,22 @@ vendor ICD because it does not expose the `nullDescriptor` feature of
 coverage is otherwise broad, so this is a feature gap rather than a "Vulkan 1.1
 driver" problem; [zink-gate.md](zink-gate.md) records the full evidence.
 Desktop OpenGL is therefore provided by GL4ES translating GL 2.1 to vendor
-GLES. GL4ES is built for armhf with `HYBRIS=ON` and `GLX_STUBS=ON`:
+GLES. `opengl/build-gl4es.sh` pins the verified upstream commit, applies the
+hybris EGL-platform patch, generates the armhf toolchain file and builds with
+`HYBRIS=ON` and `GLX_STUBS=ON`:
 
 ```sh
-cmake -S "$GL4ES_SRC" -B "$HOME/mesa-pvr-build/build-gl4es" \
-  -DCMAKE_TOOLCHAIN_FILE="$HOME/mesa-pvr-build/armhf-toolchain.cmake" \
-  -DHYBRIS=ON -DGLX_STUBS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
-make -C "$HOME/mesa-pvr-build/build-gl4es" -j4
+ARMHF_TOOLCHAIN="$HOME/toolchains/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-linux-gnueabihf" \
+ARMHF_SYSROOT="$HOME/armhf-sysroot" \
+OUT_DIR="$HOME/mesa-pvr-build/gl4es-out" \
+opengl/build-gl4es.sh
 ```
 
-The build writes `lib/libGL.so.1` into the GL4ES source tree, not the build
-directory. Stage it as `/opt/pvr-bridge/gl4es/lib/libGL.so.1` (plus a
-`libGL.so` symlink) inside the chroot.
+Set `GL4ES_SRC` to reuse an existing checkout and `GL4ES_REF` to override the
+pinned commit. The build writes `lib/libGL.so.1` into the GL4ES source tree, not
+the build directory; the script copies it to `$OUT_DIR/lib/`. Stage it as
+`/opt/pvr-bridge/gl4es/lib/libGL.so.1` (plus a `libGL.so` symlink) inside the
+chroot.
 
 `patches/gl4es-hybris-eglplatform.patch` is required. Upstream GL4ES asks for
 `EGL_PLATFORM_ANDROID_KHR` whenever `HYBRIS` is defined, in both
