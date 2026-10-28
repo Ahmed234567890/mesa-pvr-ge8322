@@ -209,27 +209,72 @@ fi
 
 echo "=== hardware video encode ==="
 
-# 320x240 NV12 black frame, three frames, encoded on the SPRD H.264 core.
-head -c 115200 /dev/zero >"$CH/tmp/va-in.nv12"
-rm -f "$CH/tmp/va-out.h264"
+# Three 320x240 NV12 black frames: 3 * 320 * 240 * 3 / 2 = 345600 bytes.
+head -c 345600 /dev/zero >"$CH/tmp/va-in.nv12"
 
-if timeout 120 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+encode() {
+    codec=$1
+    ext=$2
+    rm -f "$CH/tmp/vd-$codec.$ext"
+    timeout 120 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
         /opt/pvr-bridge/encoders/bin/omx-enc-env \
-        -c h264 -w 320 -h 240 -r 30 -b 400000 -n 3 \
-        -i /tmp/va-in.nv12 -o /tmp/va-out.h264 -q \
-        >"$TMPD/omx-enc.log" 2>&1 \
-        && [ -s "$CH/tmp/va-out.h264" ]; then
-    pass "omx-h264-encode ($(wc -c <"$CH/tmp/va-out.h264") bytes)"
+        -c "$codec" -w 320 -h 240 -r 30 -b 400000 -n 3 \
+        -i /tmp/va-in.nv12 -o "/tmp/vd-$codec.$ext" -q \
+        >"$TMPD/omx-enc-$codec.log" 2>&1
+}
+
+for spec in "h264 h264" "h265 h265" "h263 263" "mpeg4 m4v"; do
+    set -- $spec
+    if encode "$1" "$2" && [ -s "$CH/tmp/vd-$1.$2" ]; then
+        pass "omx-$1-encode ($(wc -c <"$CH/tmp/vd-$1.$2") bytes)"
+    else
+        fail "omx-$1-encode"
+    fi
+done
+
+# Independent software decode of the hardware encoder's H.264 output.
+if timeout 120 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+        /usr/bin/ffmpeg -v error -i /tmp/vd-h264.h264 -f null - \
+        >"$TMPD/omx-enc-verify.log" 2>&1; then
+    pass "omx-h264-encode-ffmpeg-verify"
 else
-    fail "omx-h264-encode"
+    fail "omx-h264-encode-ffmpeg-verify"
 fi
 
-if timeout 120 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
-        /usr/bin/ffmpeg -v error -i /tmp/va-out.h264 -f null - \
-        >"$TMPD/omx-dec.log" 2>&1; then
-    pass "omx-h264-decode-check"
+echo "=== hardware video decode ==="
+
+# Decoding three 320x240 frames must yield exactly 3 * 115200 bytes.
+decode_hw() {
+    codec=$1
+    ext=$2
+    label=$3
+    extra=$4
+    rm -f "$CH/tmp/vd-$label.nv12"
+    timeout 180 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+        /opt/pvr-bridge/encoders/bin/omx-dec-env -c "$codec" $extra \
+        -i "/tmp/vd-$codec.$ext" -o "/tmp/vd-$label.nv12" \
+        >"$TMPD/omx-dec-$label.log" 2>&1
+    size=$(wc -c <"$CH/tmp/vd-$label.nv12" 2>/dev/null || echo 0)
+    if [ "$size" -eq 345600 ]; then
+        pass "omx-$label-decode-hw"
+    else
+        fail "omx-$label-decode-hw (size=$size, want 345600)"
+    fi
+}
+
+decode_hw h264  h264 h264     ""
+decode_hw h265  h265 h265     ""
+decode_hw h263  263  h263     ""
+decode_hw mpeg4 m4v  mpeg4    ""
+decode_hw h264  h264 h264-i420 "-p i420"
+
+# VP9 has no byte-level frame delimiter, so the input is an IVF fixture that
+# the host driver pushes.  Without it the check is reported as XFAIL.
+if [ -s /data/local/tmp/vp9-320x240-3f.ivf ]; then
+    cp /data/local/tmp/vp9-320x240-3f.ivf "$CH/tmp/vd-vp9.ivf"
+    decode_hw vp9 ivf vp9 ""
 else
-    fail "omx-h264-decode-check"
+    xfail "omx-vp9-decode-hw (fixture /data/local/tmp/vp9-320x240-3f.ivf not pushed)"
 fi
 
 echo "=== desktop session ==="
@@ -257,7 +302,7 @@ if [ "$FULL" = 1 ]; then
     fi
 fi
 
-rm -f "$CH/tmp/va-in.nv12" "$CH/tmp/va-out.h264"
+rm -f "$CH/tmp/va-in.nv12" "$CH/tmp/vd-"*
 
 echo
 echo "summary: pass=$PASS_N fail=$FAIL_N xfail=$XFAIL_N"

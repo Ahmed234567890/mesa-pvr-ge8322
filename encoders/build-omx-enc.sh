@@ -49,14 +49,16 @@ adb_cmd shell "mkdir -p /data/local/tmp/omx-headers"
 adb_cmd push "$HEADERS/." /data/local/tmp/omx-headers/
 adb_cmd push "$BUILD/libgbm-shim.so" /data/local/tmp/libgbm-shim.so
 adb_cmd push "$HERE/src/omx-enc.c" /data/local/tmp/omx-enc.c
+adb_cmd push "$HERE/src/omx-dec.c" /data/local/tmp/omx-dec.c
 adb_cmd push "$HERE/phone/build-omx-enc.sh" /data/local/tmp/build-omx-enc.sh
 
 echo "== building inside the chroot =="
 adb_cmd shell "su -c 'sh /data/local/tmp/build-omx-enc.sh'"
 
-echo "== installing wrapper =="
+echo "== installing wrappers =="
 adb_cmd shell "su -c 'mkdir -p $CHROOT/opt/pvr-bridge/encoders/bin'"
 adb_cmd push "$HERE/omx-enc-env" "$CHROOT/opt/pvr-bridge/encoders/bin/omx-enc-env"
-adb_cmd shell "su -c 'chmod 755 $CHROOT/opt/pvr-bridge/encoders/bin/omx-enc-env'"
+adb_cmd push "$HERE/omx-dec-env" "$CHROOT/opt/pvr-bridge/encoders/bin/omx-dec-env"
+adb_cmd shell "su -c 'chmod 755 $CHROOT/opt/pvr-bridge/encoders/bin/omx-enc-env $CHROOT/opt/pvr-bridge/encoders/bin/omx-dec-env'"
 
-echo "done: /opt/pvr-bridge/encoders/bin/omx-enc (inside Kali)"
+echo "done: /opt/pvr-bridge/encoders/bin/{omx-enc,omx-dec} (inside Kali)"
