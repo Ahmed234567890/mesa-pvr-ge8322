@@ -174,7 +174,7 @@ Set `DISPLAY` before invocation to target a different X server. This confirms a
 visible GLES path for this benchmark, not desktop OpenGL or Minecraft
 compatibility.
 
-The working libhybris build carries four local patches under `patches/`:
+The working libhybris build carries five local patches under `patches/`:
 
 - `libhybris-egl-terminate-order.patch` calls the vendor `eglTerminate()`
   before `ws_Terminate()` unloads the platform module. The vendor driver keeps
@@ -186,6 +186,11 @@ The working libhybris build carries four local patches under `patches/`:
   afterwards, because bionic's `TLS_SLOT_OPENGL` aliases that slot. This makes
   the fix part of the library instead of requiring `LD_PRELOAD` in every
   process.
+- `libhybris-egl-platform-base.patch` merges `EGL_EXT_platform_base`,
+  `EGL_EXT_platform_x11`, and `EGL_KHR_platform_x11` into the client extension
+  string, and adds the two `EGL_EXT_device_query` entry points that callers
+  resolve before they touch EGL. See
+  [EGL platform support](#egl-platform-support-egl_ext_platform_base--egl_ext_platform_x11).
 - `libhybris-x11-destroy-buffers.patch` removes invalid list iterator use from
   native-window buffer cleanup.
 - `libhybris-x11-swap-red-blue.patch` swaps red and blue in `copyToX11()` for
@@ -411,7 +416,10 @@ The probe binaries are intentionally not stored in Git. `build-probes.sh` also
 builds `libhybris-ctype-fix.so`, the preload shim that keeps glibc's ctype
 tables usable in a process hosting Android libraries. The X11 probe is expected
 to print `egl-gles2-x11-smoke: PASS` once the ctype shim is preloaded and the
-patched `eglplatform_x11.so` is staged.
+patched `eglplatform_x11.so` is staged. It also builds `egl-platform-smoke`,
+which checks the `EGL_EXT_platform_base` advertisement and drives
+`eglGetPlatformDisplayEXT` → `eglCreatePlatformWindowSurfaceEXT` →
+surfaceless context end to end.
 
 ## Run the pbuffer smoke test on the phone
 
@@ -470,6 +478,76 @@ The window stays mapped only briefly, and the probe does not redraw on `Expose`
 events, so it goes black if the X server clears it after the first present.
 That is cosmetic; use `glmark2-es2-x11 --run-forever` for a continuously
 redrawn visible test.
+
+## EGL platform support (EGL_EXT_platform_base / EGL_EXT_platform_x11)
+
+libhybris has always implemented `eglGetPlatformDisplay()`,
+`eglCreatePlatformWindowSurface()`, and their `EXT` aliases, and
+`__eglHybrisGetPlatformDisplayCommon()` already mapped
+`EGL_PLATFORM_X11_KHR` to the `x11` platform module. The gap was the
+advertisement: `ws_eglQueryString()` returned the vendor client extension
+string verbatim for `EGL_NO_DISPLAY`, so
+`eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS)` listed only the Android
+client extensions. Toolkits that gate the platform API on that string fell back
+to `eglGetDisplay()` or to GLX even though the platform path worked.
+
+Two `EGL_EXT_device_query` entry points were also missing.
+`eglQueryDeviceStringEXT` and `eglQueryDisplayAttribEXT` are not part of the
+vendor stack on this device (there is no `EGLDeviceEXT` and no `/dev/dri`), but
+callers resolve them unconditionally before they try EGL: Firefox's `glxtest`
+requires `eglQueryDeviceStringEXT` to be non-NULL and then calls
+`eglQueryDisplayAttribEXT()` without checking it, which is why every Firefox
+run reported `libEGL missing methods for GL test` and used GLX instead.
+
+`patches/libhybris-egl-platform-base.patch` changes both places:
+
+- `hybris/egl/ws.c` appends `EGL_EXT_platform_base` to the client extension
+  string, plus `EGL_EXT_platform_x11` and `EGL_KHR_platform_x11` when
+  `eglplatform_x11.so` is actually installed (honouring
+  `HYBRIS_EGLPLATFORM_DIR`). Additions are de-duplicated against the vendor
+  string, and the result is cached per process.
+- `hybris/egl/egl.c` adds `eglQueryDisplayAttribEXT()` and
+  `eglQueryDeviceStringEXT()` as clean-failure stubs (`EGL_BAD_PARAMETER`,
+  `NULL`) and registers both in `_eglHybrisOverrideFunctions`, so
+  `eglGetProcAddress()` and `dlsym()` resolve them. Neither extension is
+  advertised, because there is no device object to return.
+
+Verify the advertisement and the whole platform path with
+`opengl/egl-platform-smoke.c` (built by `opengl/build-probes.sh`):
+
+```sh
+chroot /data/local/nhsystem/kali-armhf /usr/bin/env -i \
+  HOME=/root PATH=/usr/bin:/bin DISPLAY=:1 \
+  /opt/pvr-bridge/opengl/bin/run-x11-gles \
+  /opt/pvr-bridge/opengl/bin/egl-platform-smoke
+```
+
+Expected key output:
+
+```text
+client extensions: EGL_ANDROID_GLES_layers EGL_ANGLE_platform_angle EGL_EXT_client_extensions EGL_KHR_platform_android  EGL_EXT_platform_base EGL_EXT_platform_x11 EGL_KHR_platform_x11
+[platform-smoke] eglGetPlatformDisplayEXT(EGL_PLATFORM_X11_KHR) returned a display
+[platform-smoke] eglCreatePlatformWindowSurfaceEXT succeeded
+[platform-smoke] surfaceless context works on the platform display
+center pixel: 64 128 191 255 (glError=0x0000)
+egl-platform-smoke: PASS
+```
+
+`eglinfo` now lists the three extensions under "EGL client extensions string",
+and `scripts/verify-all-device.sh` reports `PASS gles-egl-platform`.
+
+Effect on Firefox 140.11.0esr: `glxtest` now reports `TEST_TYPE EGL` with
+`GL version: OpenGL ES 3.2 build 1.18@6267915` instead of the old
+`libEGL missing methods for GL test` warning followed by a GLX/GL4ES report.
+Firefox therefore attempts the EGL path at startup, but still falls back to
+GLX on this build: its compositor asks for an OpenGL 3.2 **core profile**
+context, and the vendor EGL stack is GLES-only, so `eglCreateContext` returns
+`EGL_BAD_PARAMETER` (logged as `Failed to create EGLContext!: 0x300c`) and the
+GL 2.1 GL4ES context is used instead. Setting
+`gfx.egl.prefer-gles.enabled=true` did not change the outcome on this build.
+That is an application-side profile mismatch, not an EGL advertisement defect;
+Firefox GPU acceleration needs its own GLES selection work and is not part of
+this driver change.
 
 ## Blockers and next work
 

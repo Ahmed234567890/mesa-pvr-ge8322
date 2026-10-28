@@ -92,6 +92,22 @@ else
     fail "gles-egl-x11"
 fi
 
+# EGL_EXT_platform_base / EGL_EXT_platform_x11 have to be advertised in the
+# client extension string and the advertised entry points have to work, or
+# toolkits fall back to eglGetDisplay()/GLX.
+if [ ! -x "$CH/opt/pvr-bridge/opengl/bin/egl-platform-smoke" ]; then
+    fail "gles-egl-platform (egl-platform-smoke missing)"
+elif timeout 60 chroot "$CH" /usr/bin/env -i HOME=/root PATH=/usr/bin:/bin \
+        DISPLAY=:1 /opt/pvr-bridge/opengl/bin/run-x11-gles \
+        /opt/pvr-bridge/opengl/bin/egl-platform-smoke \
+        >"$TMPD/platform.log" 2>&1 \
+        && grep -q "egl-platform-smoke: PASS" "$TMPD/platform.log" \
+        && grep -q "center pixel: 64 128 191" "$TMPD/platform.log"; then
+    pass "gles-egl-platform ($(renderer_of "$TMPD/platform.log"))"
+else
+    fail "gles-egl-platform"
+fi
+
 echo "=== desktop OpenGL (baseline) ==="
 
 # This is a baseline, not a requirement: it records which renderer the

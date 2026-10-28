@@ -21,7 +21,11 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > pbuffer, and the X11 window path works: `glmark2-es2-x11` identifies the
 > GE8322, moving and textured scenes are visible on Termux:X11 (MIT-SHM
 > disabled), and one-shot runs exit cleanly after the `eglTerminate` ordering
-> fix. Desktop OpenGL 2.1 is available through GL4ES on the vendor GLES driver
+> fix. `libEGL` also advertises and implements the EGL platform API
+> (`EGL_EXT_platform_base`, `EGL_EXT_platform_x11`), so applications that gate
+> on `eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS)` use the platform path
+> instead of falling back to `eglGetDisplay()`/GLX. Desktop OpenGL 2.1 is
+> available through GL4ES on the vendor GLES driver
 > (`GL4ES using PowerVR Rogue GE8322`, roughly 1.7x llvmpipe on `glmark2 build`
 > and 3x on `shading` at 480x320), and the XFCE session exports that
 > environment to every child. The vendor OpenCL driver also works through
