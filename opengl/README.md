@@ -281,6 +281,64 @@ through GL4ES and 39 on Mesa llvmpipe. `scripts/verify-all.sh` reports
 binaries launched from desktop terminals working. Set `PVR_DESKTOP_GL=mesa` to
 get Mesa llvmpipe (GL 4.5) for a session that needs a newer GL version.
 
+## OpenCL
+
+The vendor driver at `/vendor/lib/libPVROCL.so` works from the Kali chroot
+through libhybris. It reports **OpenCL 3.0** on platform and device (OpenCL C
+1.2), driver `1.18@6267915`, 1 compute unit, and 1846 MiB of global memory. A
+kernel is compiled from source, enqueued, and read back with correct results;
+three consecutive runs exited 0.
+
+Two layers are provided:
+
+- `opengl/opencl-probe.c` loads the vendor library directly with
+  `hybris_dlopen()` and exercises the raw API. Use it to prove the driver
+  itself works.
+- `opengl/gen-opencl-shim.py` plus `opengl/build-opencl-shim.sh` build a
+  `libOpenCL.so.1` that exports the full 114-entry-point API and resolves each
+  function from the vendor library through libhybris on first use. With that
+  shim first in `LD_LIBRARY_PATH`, unmodified applications that link `-lOpenCL`
+  reach the GPU; `opengl/opencl-shim-smoke.c` is an ordinary client and passes.
+
+Build the shim (the vendor blob is read only for its symbol list and is not
+stored in this repository):
+
+```sh
+VENDOR_LIB="$HOME/pvr-reverse/blobs/libPVROCL.so" \
+ARMHF_TOOLCHAIN="$HOME/toolchains/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-linux-gnueabihf" \
+ARMHF_SYSROOT="$HOME/armhf-sysroot" \
+LIBHYBRIS_BUILD="$HOME/mesa-pvr-build/libhybris" \
+OUT_DIR="$HOME/mesa-pvr-build/build-opencl" \
+  opengl/build-opencl-shim.sh
+```
+
+Stage `libOpenCL.so.1.0.0` plus the `libOpenCL.so.1` and `libOpenCL.so`
+symlinks under `/opt/pvr-bridge/opencl/lib/`. `desktop/gpu-env.sh` already puts
+that directory ahead of Kali's ICD loader, so the whole session gets it.
+
+Run the probe:
+
+```sh
+chroot /data/local/nhsystem/kali-armhf /usr/bin/env -i HOME=/root \
+  PATH=/usr/bin:/bin \
+  LD_LIBRARY_PATH=/opt/pvr-bridge/lib:/usr/lib/arm-linux-gnueabihf \
+  ANDROID_ROOT=/system ANDROID_DATA=/data \
+  HYBRIS_LINKER_DIR=/opt/pvr-bridge/libhybris/linker \
+  HYBRIS_ANDROID_SDK_VERSION=34 \
+  HYBRIS_LD_LIBRARY_PATH=/system/lib:/vendor/lib:/vendor/lib/hw:/odm/lib:/apex/com.android.runtime/lib \
+  /opt/pvr-bridge/opengl/bin/opencl-probe
+```
+
+Device extensions include `cl_khr_fp16`, `cl_khr_spir`, `cl_khr_il_program`,
+`cl_khr_3d_image_writes`, `cl_khr_mipmap_image`, `cl_khr_integer_dot_product`,
+`cl_arm_import_memory_dma_buf`, `cl_img_use_gralloc_ptr`, and the semaphore and
+external-semaphore families. `clIcdGetPlatformIDsKHR` is not exported, so this
+is a direct forwarding library rather than an ICD: applications that enumerate
+`/etc/OpenCL/vendors` will not see it, while anything that links or `dlopen`s
+`libOpenCL.so.1` will. The shim resolves entry points lazily without a lock;
+concurrent first calls from several threads are benign because every thread
+resolves the same address.
+
 ## Build the diagnostic probes
 
 The probes use the existing host-side libhybris build and armhf sysroot; they
