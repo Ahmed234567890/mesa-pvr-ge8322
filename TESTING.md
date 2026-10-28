@@ -17,7 +17,7 @@ readiness or Vulkan conformance.
 | `vkcube` on Termux:X11 `:1` | Fail: swapchain ioctl ID 11 / func 2 returns `EINVAL`; aborts before verified rendering | Pass; visible cube verified |
 | Render/readback | No successful Mesa submission/readback verified | Vendor clear-only render/readback passed; not a Mesa result |
 | Full `vkmark` suite | Not run: Mesa queue-submit and swapchain paths are blocked | Pass; score 60, each scene 60 FPS with FIFO/vsync |
-| OpenGL ES pbuffer | Mesa Zink/OpenGL not tested | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, GLES 3.2, readback `64 128 191 255` |
+| OpenGL ES pbuffer | Zink gated out: vendor ICD lacks `VK_EXT_robustness2.nullDescriptor` | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, GLES 3.2, readback `64 128 191 255` |
 | OpenGL ES X11 smoke probe | Mesa path not tested | Pass via libhybris + vendor EGL/GLES; GE8322 renderer, X window visible, readback `64 128 191 255` |
 | `glmark2-es2-x11 --validate` via vendor GLES | Mesa path not tested | Pass: reports GE8322, validates scenes, exits 0 |
 | `glmark2-es2-x11` timed scene via vendor GLES | Mesa path not tested | Pass: renders visible GE8322 scenes, `--run-forever` and one-shot both exit 0 |
@@ -114,8 +114,11 @@ accidentally selecting the vendor ICD or preloading the bridge layer.
    offscreen clear, synchronization, and readback before testing WSI.
 4. **X11 WSI:** diagnose Mesa `vkcube` after queue submission works; test
    Termux:X11 separately from KeX/Xtigervnc.
-5. **OpenGL:** build/test Zink on Mesa Vulkan only after Vulkan execution is
-   sound. The vendor-HAL Zink path previously lacked `nullDescriptor`.
+5. **OpenGL:** Zink is gated out on the vendor ICD (missing
+   `VK_EXT_robustness2.nullDescriptor`) and on Mesa `pvr` (device
+   initialisation fails against `pvrsrvkm`); see
+   [opengl/zink-gate.md](opengl/zink-gate.md). Desktop GL 2.1 is delivered by
+   GL4ES on vendor GLES instead.
 6. **Build reproducibility:** automate target-ABI usclib generation, rebuild
    from documented sources, remove temporary `PVRDBG` logging, and retest the
    vendor `sysvk` baseline.
@@ -204,8 +207,12 @@ is `/tmp/opencode/phone-vendor-vkmark-full.log` and is not part of the repo.
 - No Mesa `vkmark` benchmark can be claimed until submission and WSI work.
 - Kali's desktop has not been validated as GPU-rendered. The visible cube and
   benchmark use the separate vendor HAL, not Mesa.
-- OpenGL/Zink on this Mesa path has not been brought up or validated. Do not
-  infer OpenGL acceleration from Vulkan device enumeration or vendor results.
+- OpenGL/Zink is gated out on both paths: Zink rejects the vendor ICD for
+  lacking `VK_EXT_robustness2.nullDescriptor`, and Mesa `pvr` fails device
+  enumeration against the proprietary `pvrsrvkm` module. Desktop GL 2.1 is
+  provided by GL4ES on vendor GLES; see
+  [opengl/zink-gate.md](opengl/zink-gate.md). Do not infer Mesa OpenGL
+  acceleration from Vulkan device enumeration or vendor results.
 - Mainline Mesa `pvr` expects the `drm/imagination` kernel UAPI; this phone
   exposes proprietary `pvrsrvkm`. A compatible kernel DRM path or another
   maintainable interface is still a major prerequisite for upstream Mesa.
@@ -220,8 +227,10 @@ is `/tmp/opencode/phone-vendor-vkmark-full.log` and is not part of the repo.
 2. Fix and verify Mesa offscreen submit, clear, synchronization, and readback.
 3. Diagnose the Mesa swapchain ioctl only after rendering works; then retry
    Mesa `vkcube` and a Mesa `vkmark` run.
-4. Validate Zink/OpenGL separately, checking the renderer string for the PowerVR
-   GPU rather than `llvmpipe`/`softpipe`.
+4. Re-open the Zink gate only if a newer vendor DDK exposes
+   `VK_EXT_robustness2` with `nullDescriptor`, or if `drm/imagination` becomes
+   available and Mesa `pvr` passes queue submission; then check the renderer
+   string for the PowerVR GPU rather than `llvmpipe`/`softpipe`.
 5. Only after those pass, test a lightweight desktop with compositing disabled
    first. Keep the working vendor ICD as fallback and do not replace global
    Vulkan/OpenGL libraries during bring-up.

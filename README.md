@@ -28,7 +28,9 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
 > OpenCL 3.0 (OpenCL C 1.2) with 1 compute unit, runs real kernels, and a
 > generated `libOpenCL.so.1` shim lets ordinary `-lOpenCL` applications reach
 > the GPU. Mesa GLX still reports llvmpipe, and OpenGL 3.x/4.x is not
-> available on this hardware.
+> available on this hardware: Zink rejects the vendor ICD for lacking
+> `VK_EXT_robustness2.nullDescriptor`, and Mesa `pvr` cannot initialise against
+> `pvrsrvkm`. See [opengl/zink-gate.md](opengl/zink-gate.md).
 
 ## Start here
 
@@ -37,9 +39,10 @@ GE8322 (BVNC `22.86.104.218`), targeting the Samsung Galaxy A03 Core
   blockers, and ordered next tests
 - [opengl/README.md](opengl/README.md) — vendor GLES/libhybris bring-up, smoke
   tests, X11 blocker, and next work
-- [encoders/README.md](encoders/README.md) — SPRD H.264/HEVC hardware encoders
-  and the software MPEG-4/H.263 pair through libhybris, including the Android 14
-  shim and the two vendor patches
+- [encoders/README.md](encoders/README.md) — SPRD hardware H.264/HEVC encoders,
+  software MPEG-4/H.263 encoders, and hardware H.264/HEVC/MPEG-4/H.263/VP9
+  decoders through libhybris, including the Android 14 shim and the two vendor
+  patches
 - [TERMUX-X11-DESKTOP.md](TERMUX-X11-DESKTOP.md) — XFCE startup and Prism/Minecraft
   status on the phone's Termux:X11 display
 - [bridge/README.md](bridge/README.md) — vendor Vulkan HAL → libhybris →

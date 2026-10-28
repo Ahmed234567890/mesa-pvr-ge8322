@@ -68,7 +68,7 @@ published here.
 | `glmark2 --benchmark build` (GLX) through `desktop/bin/gpu-env` | **Pass**; GE8322 renderer, score 139 at 480x320, exit 0 | Same scene on Mesa llvmpipe scores 39, so the GL4ES path is ~3.6x faster and uses the GPU |
 | Vendor `glmark2-es2-x11` with no `LD_PRELOAD` | **Pass**; GE8322, score 212 | The ctype repair inside `libEGL` is sufficient; no preload is needed for a whole session |
 | Kali `glmark2-es2 --off-screen --validate` (default Mesa EGL) | Most validation cases pass; reports Mesa `llvmpipe` | Software GLES only; not GE8322 acceleration |
-| Mesa `pvr` OpenGL/Zink | Not tested | Mesa Vulkan submit and WSI failures remain; vendor GLES results do not imply Mesa support |
+| Mesa `pvr` OpenGL/Zink | Tested and gated out | Mesa `pvr` cannot enumerate a device (`VK_ERROR_INITIALIZATION_FAILED`, expects `drm/imagination`), and Zink rejects the vendor ICD for lacking `VK_EXT_robustness2.nullDescriptor`; see [zink-gate.md](zink-gate.md) |
 | Kali desktop acceleration | Not tested / not working evidence | XFCE runs on Termux:X11, but draws through X11/CPU; no compositor or desktop app has been verified on the vendor GLES path |
 
 The X11 probe crash had two independent causes, both now fixed.
@@ -226,10 +226,14 @@ Then copy `hybris/egl/.libs/libEGL.so.1.0.0` to
 
 ## Desktop OpenGL through GL4ES
 
-Mesa cannot present vendor frames to Termux:X11 (`screen 0 does not appear to be
-DRI3 capable`), and Zink needs Vulkan extensions the 1.1 DDK does not have, so
-desktop OpenGL is provided by GL4ES translating GL 2.1 to vendor GLES. GL4ES is
-built for armhf with `HYBRIS=ON` and `GLX_STUBS=ON`:
+Mesa is not usable as the desktop GL path on this phone. Zink rejects the
+vendor ICD because it does not expose the `nullDescriptor` feature of
+`VK_EXT_robustness2`, which Mesa treats as a hard requirement, and Mesa's own
+`pvr` ICD cannot initialise against the `pvrsrvkm` kernel module. Extension
+coverage is otherwise broad, so this is a feature gap rather than a "Vulkan 1.1
+driver" problem; [zink-gate.md](zink-gate.md) records the full evidence.
+Desktop OpenGL is therefore provided by GL4ES translating GL 2.1 to vendor
+GLES. GL4ES is built for armhf with `HYBRIS=ON` and `GLX_STUBS=ON`:
 
 ```sh
 cmake -S "$GL4ES_SRC" -B "$HOME/mesa-pvr-build/build-gl4es" \
